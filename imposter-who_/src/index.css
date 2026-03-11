@@ -8,8 +8,8 @@
 html,
 body {
   overflow-x: hidden;
+  overflow-y: auto;
   -webkit-text-size-adjust: 100%;
-  overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile */
   scroll-behavior: smooth;
 }
 

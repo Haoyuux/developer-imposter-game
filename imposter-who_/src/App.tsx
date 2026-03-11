@@ -1118,7 +1118,7 @@ export default function App() {
   };
 
   const renderClues = () => (
-    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 lg:py-16 space-y-12 sm:space-y-20 min-h-screen flex flex-col justify-center">
+    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 lg:py-16 space-y-12 sm:space-y-20 min-h-screen">
       <div className="text-center space-y-8 sm:space-y-10">
         <motion.div
           initial={{ y: -20, opacity: 0 }}
@@ -1280,7 +1280,7 @@ export default function App() {
     };
 
     return (
-      <div className="max-w-4xl mx-auto px-4 pt-8 pb-40 sm:py-20 space-y-12 sm:space-y-20 min-h-screen flex flex-col justify-center">
+      <div className="max-w-4xl mx-auto px-4 pt-8 pb-40 sm:py-20 space-y-12 sm:space-y-20 min-h-screen">
         <div className="text-center space-y-10 sm:space-y-16">
           <motion.div
             initial={{ y: -20, opacity: 0 }}
@@ -1565,7 +1565,7 @@ export default function App() {
     });
 
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 sm:p-6 space-y-8 sm:space-y-12 text-center pb-16 sm:pb-32 min-h-screen flex flex-col justify-center">
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:p-6 space-y-8 sm:space-y-12 text-center pb-16 sm:pb-32 min-h-screen">
         <motion.div
           initial={{ scale: 0.8, opacity: 0, y: 40 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
