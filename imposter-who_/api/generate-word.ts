@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { categories } = req.body;
     const categoriesStr =
-      categories && categories.length > 0 ? categories.join(", ") : "random";
+      categories && categories.length > 0 ? categories.join(", ") : "general";
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
@@ -18,23 +18,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const seed = Math.floor(Math.random() * 99999);
-    const prompt = `You are picking a word and a hint for a party game called "Imposter". [seed:${seed}]
-    Pick one secret word from the category: "${categoriesStr}"
-    Return ONLY valid JSON: {"word": "secretword", "type": "type", "hint": "hintword"}`;
+    const prompt = `Pick one secret word from the category: "${categoriesStr}" and a associated hint. [seed:${seed}] 
+    Rules for hint: one associated word but NOT the same type (e.g. food -> fork).
+    Return ONLY pure JSON: {"word": "word", "hint": "hint"}`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const raw = response.text().trim();
 
-    const cleaned = raw
-      .replace(/^```json\s*/i, "")
-      .replace(/```$/, "")
-      .trim();
+    // Clean potential markdown or extra text
+    const cleaned = raw.replace(/```json\s*|```\s*/gi, "").trim();
     const parsed = JSON.parse(cleaned);
 
     return res.status(200).json({
-      word: parsed.word.toLowerCase(),
-      hint: parsed.hint.toLowerCase(),
+      word: (parsed.word || "error").toLowerCase(),
+      hint: (parsed.hint || "error").toLowerCase(),
     });
   } catch (err: any) {
     console.error("AI Generation failed:", err);
