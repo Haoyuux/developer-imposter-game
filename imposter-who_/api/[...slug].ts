@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, url = "" } = req;
@@ -7,30 +7,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   console.log(`[NeuralBrain] Incoming ${method} request to: ${url}`);
 
+  if (!apiKey) {
+    console.error("[NeuralBrain] GEMINI_API_KEY IS MISSING!!!");
+    return res.status(500).json({
+      status: "error",
+      message: "API key is missing in Vercel settings.",
+    });
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
   // 1. Diagnostics/Health Check
   if (url.includes("/health") || url.endsWith("/health")) {
-    if (!apiKey) {
-      console.error("[NeuralBrain] GEMINI_API_KEY IS MISSING!!!");
-      return res.status(500).json({
-        status: "error",
-        message: "API key is missing in Vercel settings.",
-      });
-    }
-
     const masked =
       apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
     console.log(`[NeuralBrain] Key Check: Found (${masked})`);
 
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
+      await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: "ping",
       });
-      await model.generateContent("ping");
       return res.status(200).json({
         status: "ok",
         message: "Neural Core Online",
-        diagnostics: { keyDetected: true, model: "gemini-1.5-flash" },
+        diagnostics: { keyDetected: true, model: "gemini-2.0-flash" },
       });
     } catch (err: any) {
       console.error("[NeuralBrain] AI test failed:", err.message);
@@ -45,24 +46,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 2. Word Generation
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
-      if (!apiKey) throw new Error("API key missing.");
       const { categories = ["random"] } = req.body || {};
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
-      });
 
       const prompt = `Game: "Imposter". Category: "${categories.join(", ")}". 
       Generate ONE common secret word and one hint associated with it but NOT the same type (e.g. word: 'pizza', hint: 'box').
       Return format: PURE JSON ONLY. No markdown.
       Example: {"word": "pizza", "hint": "box"}`;
 
-      const result = await model.generateContent(prompt);
-      const text = (await result.response)
-        .text()
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: prompt,
+      });
+
+      const text = (result.text || "")
         .trim()
         .replace(/```json\s*|```\s*/gi, "");
+
       const data = JSON.parse(text);
 
       return res.status(200).json({

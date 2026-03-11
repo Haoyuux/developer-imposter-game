@@ -4,15 +4,12 @@ import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
-});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,9 +68,12 @@ RULES for hint:
 Return ONLY valid JSON:
 {"word": "secretword", "type": "type", "hint": "hintword"}`;
 
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  const raw = response.text().trim();
+  const result = await ai.models.generateContent({
+    model: "gemini-2.0-flash",
+    contents: prompt,
+  });
+
+  const raw = (result.text || "").trim();
   try {
     const cleaned = raw
       .replace(/^```json\s*/i, "")
@@ -108,10 +108,11 @@ async function startServer() {
 
   app.get("/api/health", async (req, res) => {
     try {
-      // Test the AI connection with a tiny prompt
-      const result = await model.generateContent("ping");
-      const response = await result.response;
-      if (response.text()) {
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: "ping",
+      });
+      if (result.text) {
         return res.json({ status: "ok", message: "AI is ready" });
       }
       throw new Error("Empty response from AI");
