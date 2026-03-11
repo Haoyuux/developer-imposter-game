@@ -36,7 +36,6 @@ const RANDOM_STARTERS = [
   "Generate a diverse list first, then pick from the less obvious ones.",
 ];
 
-// Combined focused call to save quota (1 call instead of 2)
 async function generateGameData(
   categoriesStr: string,
 ): Promise<{ word: string; type: string; hint: string }> {
@@ -158,7 +157,6 @@ async function startServer() {
       const { categories } = req.body;
       const categoriesStr =
         categories && categories.length > 0 ? categories.join(", ") : "random";
-      // Single combined focused call to save quota
       const { word, type, hint } = await generateGameData(categoriesStr);
 
       if (word) {
@@ -170,15 +168,8 @@ async function startServer() {
       res.json({ word: word.toLowerCase(), hint });
     } catch (err: any) {
       console.error("AI Generation failed:", err);
-
-      let errorMessage = "Failed to generate word";
-      if (err.status === 403 || err.message?.includes("leaked")) {
-        errorMessage =
-          "API Key error: Your key is either missing, invalid, or has been reported as leaked. Please update your .env file.";
-      }
-
       res.status(500).json({
-        error: errorMessage,
+        error: "Failed to generate word",
         details: err.message,
       });
     }
@@ -200,15 +191,6 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`\n🚀 Game Server is live!`);
     console.log(`> Local:   http://localhost:${PORT}`);
-
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]!) {
-        if (iface.family === "IPv4" && !iface.internal) {
-          console.log(`> Network: http://${iface.address}:${PORT}`);
-        }
-      }
-    }
     console.log("");
   });
 }

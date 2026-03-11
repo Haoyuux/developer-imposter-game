@@ -5,14 +5,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, url = "" } = req;
   const apiKey = process.env.GEMINI_API_KEY;
 
-  console.log(`[NeuralBrain] Incoming ${method} request to: ${url}`);
-
   if (!apiKey) {
-    console.error("[NeuralBrain] GEMINI_API_KEY IS MISSING!!!");
-    return res.status(500).json({
-      status: "error",
-      message: "API key is missing in Vercel settings.",
-    });
+    return res
+      .status(500)
+      .json({
+        status: "error",
+        message: "API key missing in Vercel settings.",
+      });
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -21,31 +20,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 1. Diagnostics/Health Check
   if (url.includes("/health") || url.endsWith("/health")) {
-    console.log(`[NeuralBrain] Key Check: Found (${masked})`);
+    const results: any = {};
+    const modelsToTry = [
+      "gemini-1.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash-8b",
+    ];
 
-    try {
-      await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: "ping",
-      });
-      return res.status(200).json({
-        status: "ok",
-        message: "Neural Core Online",
-        diagnostics: {
-          keyDetected: true,
-          model: "gemini-1.5-flash",
-          keyMasked: masked,
-        },
-      });
-    } catch (err: any) {
-      console.error("[NeuralBrain] AI test failed:", err.message);
-      return res.status(200).json({
-        status: "error",
-        message: "API key recognized but Google returned an error.",
-        details: err.message,
-        keyUsed: masked,
-      });
+    for (const modelName of modelsToTry) {
+      try {
+        await ai.models.generateContent({
+          model: modelName,
+          contents: "ping",
+        });
+        return res.status(200).json({
+          status: "ok",
+          message: `Neural Core Online (Success with ${modelName})`,
+          diagnostics: {
+            activeModel: modelName,
+            keyUsed: masked,
+          },
+        });
+      } catch (err: any) {
+        results[modelName] = err.message;
+      }
     }
+
+    // If ALL failed:
+    return res.status(200).json({
+      status: "error",
+      message:
+        "Multiple models attempted but all failed. Your API key might be restricted to specific models or regionalized.",
+      keyUsed: masked,
+      attempts: results,
+    });
   }
 
   // 2. Word Generation
@@ -58,6 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Return format: PURE JSON ONLY. No markdown.
       Example: {"word": "pizza", "hint": "box"}`;
 
+      // Try 1.5 Flash first as it has most reliable free quota
       const result = await ai.models.generateContent({
         model: "gemini-1.5-flash",
         contents: prompt,
@@ -74,25 +83,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         hint: (data.hint || "error").toLowerCase(),
       });
     } catch (err: any) {
-      console.error("[NeuralBrain] Gen failure:", err.message);
-      return res
-        .status(500)
-        .json({ error: "AI Generation failure", details: err.message });
+      return res.status(500).json({
+        error: "AI Generation failure",
+        details: err.message,
+        keyUsed: masked,
+      });
     }
   }
 
-  // 3. Leaderboard (Stubbed for stability)
+  // 3. Leaderboard/Score logic (Stubs)
   if (url.includes("/leaderboard") || url.endsWith("/leaderboard"))
-    return res.status(200).json([]);
+    return res.json([]);
   if (url.includes("/score") || url.endsWith("/score"))
-    return res.status(200).json({ success: true });
+    return res.json({ success: true });
 
-  // Generic Fallback
-  console.log(`[NeuralBrain] Path fallback reached for URL: ${url}`);
   return res.status(200).json({
     message: "Neural Core reached, but route unknown.",
     url: url,
-    method: method,
-    advice: "Check your App.tsx fetch paths. The URL being received is: " + url,
+    keyUsed: masked,
   });
 }
