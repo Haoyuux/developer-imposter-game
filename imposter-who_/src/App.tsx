@@ -792,27 +792,54 @@ export default function App() {
           </div>
         </div>
 
-        <button
-          disabled={
-            gameState.groups.length < 2 ||
-            gameState.players.length <= gameState.numImposters ||
-            isGenerating
-          }
-          onClick={startGame}
-          className="w-full py-4 md:py-6 bg-emerald-500 text-white rounded-[2rem] font-black text-xl md:text-2xl shadow-[0_8px_0_#064e3b] md:shadow-[0_10px_0_#064e3b] active:shadow-none active:translate-y-2 transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed flex items-center justify-center gap-3 uppercase italic tracking-widest"
-        >
-          {isGenerating ? (
-            <RefreshCw size={28} className="animate-spin" />
-          ) : (
-            <Play size={28} fill="currentColor" />
-          )}
-          {isGenerating
-            ? "Generating Word..."
-            : gameState.groups.length > 0 &&
-                gameState.players.length <= gameState.numImposters
-              ? "Not enough players"
-              : "Launch Game"}
-        </button>
+        {/* Start Game Validation & Button */}
+        <div className="space-y-4">
+          <button
+            disabled={
+              gameState.groups.length < 2 ||
+              gameState.players.length <= gameState.numImposters ||
+              selectedCategories.length === 0 ||
+              isGenerating
+            }
+            onClick={startGame}
+            className="w-full py-4 md:py-6 bg-emerald-500 text-white rounded-[2rem] font-black text-xl md:text-2xl shadow-[0_8px_0_#064e3b] md:shadow-[0_10px_0_#064e3b] active:shadow-none active:translate-y-2 transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed flex items-center justify-center gap-3 uppercase italic tracking-widest"
+          >
+            {isGenerating ? (
+              <RefreshCw size={28} className="animate-spin" />
+            ) : (
+              <Play size={28} fill="currentColor" />
+            )}
+            {isGenerating
+              ? "Generating Word..."
+              : gameState.groups.length < 2
+                ? "Add more groups"
+                : gameState.players.length <= gameState.numImposters
+                  ? "More players than imposters needed"
+                  : selectedCategories.length === 0
+                    ? "Select a category"
+                    : "Launch Game"}
+          </button>
+
+          {/* Optional: Validation Warning text */}
+          <div className="flex flex-wrap justify-center gap-2">
+            {gameState.groups.length < 2 && (
+              <span className="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded-full border-2 border-red-100 flex items-center gap-1 animate-pulse">
+                ⚠️ Need 2+ Groups
+              </span>
+            )}
+            {gameState.players.length <= gameState.numImposters &&
+              gameState.players.length > 0 && (
+                <span className="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded-full border-2 border-red-100 flex items-center gap-1 animate-pulse">
+                  ⚠️ Too Many Imposters
+                </span>
+              )}
+            {selectedCategories.length === 0 && (
+              <span className="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded-full border-2 border-red-100 flex items-center gap-1 animate-pulse">
+                ⚠️ Select a Category
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-4">
