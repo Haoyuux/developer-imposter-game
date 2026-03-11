@@ -1,24 +1,13 @@
 {
   "version": 2,
+  "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/api/health",
-      "destination": "/api/health.ts"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
     },
     {
-      "source": "/api/generate-word",
-      "destination": "/api/generate-word.ts"
-    },
-    {
-      "source": "/api/leaderboard",
-      "destination": "/api/leaderboard.ts"
-    },
-    {
-      "source": "/api/score",
-      "destination": "/api/leaderboard.ts"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
