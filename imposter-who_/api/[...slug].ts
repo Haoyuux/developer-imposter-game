@@ -6,50 +6,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey)
-    return res.status(500).json({ status: "error", message: "Key missing" });
+    return res
+      .status(500)
+      .json({ status: "error", message: "API key missing." });
 
-  // Use default configuration first
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
   const masked =
     apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
 
   if (url.includes("/health") || url.endsWith("/health")) {
     try {
-      console.log("[NeuralBrain] Attempting to list available models...");
+      console.log("[NeuralBrain] Attempting to find available models...");
 
-      // CALL LIST TO SEE WHAT THIS KEY ACTUALLY HAS ACCESS TO
-      const modelsResponse = await ai.models.list();
-      const availableModels = modelsResponse.map((m: any) => m.name);
+      const foundModels: string[] = [];
+      const modelsIterator = await ai.models.list();
 
-      return res.status(200).json({
-        status: "ok",
-        message: "Neural Core reached. Listing available models for this key.",
-        keyUsed: masked,
-        availableModels: availableModels.slice(0, 10), // Show first 10
-      });
-    } catch (err: any) {
-      console.error("[NeuralBrain] List failed:", err.message);
+      // Iterate through the async iterator to get model names
+      for await (const model of modelsIterator) {
+        foundModels.push(model.name);
+        if (foundModels.length >= 15) break;
+      }
 
-      // If listing fails, try forcing a specific known ID format
-      try {
-        await ai.models.generateContent({
-          model: "models/gemini-1.5-flash", // TRY WITH THE models/ PREFIX
-          contents: "ping",
-        });
+      if (foundModels.length > 0) {
         return res.status(200).json({
           status: "ok",
-          message: "Success using models/gemini-1.5-flash prefix",
+          message: "Neural Core reached. Found active models.",
           keyUsed: masked,
-        });
-      } catch (innerErr: any) {
-        return res.status(200).json({
-          status: "error",
-          message: "Could not list models or ping gemini.",
-          keyUsed: masked,
-          listError: err.message,
-          pingError: innerErr.message,
+          availableModels: foundModels,
         });
       }
+
+      return res.status(200).json({
+        status: "error",
+        message:
+          "No models found for this API key. Is the Generative Language API enabled?",
+        keyUsed: masked,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        status: "error",
+        message: "Discovery failed.",
+        keyUsed: masked,
+        error: err.message,
+        stack: err.stack?.split("\n").slice(0, 3).join(" | "),
+      });
     }
   }
 
@@ -57,35 +57,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       const { categories = ["random"] } = req.body || {};
+
+      // We try common names. If discovery worked above, we can refine this.
       const resAI = await ai.models.generateContent({
         model: "gemini-1.5-flash",
-        contents: `JSON only: {"word":"...","hint":"..."} for category: ${categories.join(",")}`,
+        contents: `JSON format: {"word":"...","hint":"..."} for category: ${categories.join(",")}`,
       });
       return res
         .status(200)
         .json(JSON.parse(resAI.text.trim().replace(/```json\s*|```\s*/gi, "")));
     } catch (err: any) {
-      // Fallback attempt with prefix
-      try {
-        const resAI = await ai.models.generateContent({
-          model: "models/gemini-1.5-flash",
-          contents: `JSON only: {"word":"...","hint":"..."} for category: ${categories.join(",")}`,
-        });
-        return res
-          .status(200)
-          .json(
-            JSON.parse(resAI.text.trim().replace(/```json\s*|```\s*/gi, "")),
-          );
-      } catch (finalErr: any) {
-        return res.status(500).json({
-          error: "AI Generation failure",
-          details: err.message,
-          fallback_details: finalErr.message,
-          keyUsed: masked,
-        });
-      }
+      return res.status(500).json({
+        error: "Generation failed",
+        details: err.message,
+        keyUsed: masked,
+      });
     }
   }
 
-  return res.status(200).json({ status: "not_found" });
+  return res.status(200).json({ message: "Neural reached", url });
 }
