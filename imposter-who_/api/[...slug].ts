@@ -14,7 +14,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  // FORCE API VERSION TO 'v1' TO AVOID 404s ON BETA ENDPOINTS
+  const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
   const masked =
     apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
 
@@ -23,8 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results: any = {};
     const modelsToTry = [
       "gemini-1.5-flash",
-      "gemini-2.0-flash",
       "gemini-1.5-flash-8b",
+      "gemini-1.5-pro",
     ];
 
     for (const modelName of modelsToTry) {
@@ -35,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return res.status(200).json({
           status: "ok",
-          message: `Neural Core Online (Success with ${modelName})`,
+          message: `Neural Core Online (Success with ${modelName} on v1 API)`,
           diagnostics: {
             activeModel: modelName,
             keyUsed: masked,
@@ -49,10 +50,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // If ALL failed:
     return res.status(200).json({
       status: "error",
-      message:
-        "Multiple models attempted but all failed. Your API key might be restricted to specific models or regionalized.",
+      message: "Every model failed on the stable v1 API endpoint.",
       keyUsed: masked,
-      attempts: results,
+      details: results,
     });
   }
 
@@ -66,7 +66,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Return format: PURE JSON ONLY. No markdown.
       Example: {"word": "pizza", "hint": "box"}`;
 
-      // Try 1.5 Flash first as it has most reliable free quota
       const result = await ai.models.generateContent({
         model: "gemini-1.5-flash",
         contents: prompt,
@@ -90,12 +89,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
   }
-
-  // 3. Leaderboard/Score logic (Stubs)
-  if (url.includes("/leaderboard") || url.endsWith("/leaderboard"))
-    return res.json([]);
-  if (url.includes("/score") || url.endsWith("/score"))
-    return res.json({ success: true });
 
   return res.status(200).json({
     message: "Neural Core reached, but route unknown.",
