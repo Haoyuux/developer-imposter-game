@@ -1817,48 +1817,23 @@ export default function App() {
                 Leaderboard
               </h3>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {sortedGroups.map((group, index) => (
                 <motion.div
                   key={group.id}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
-                  className={`flex items-center justify-between p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] border-4 transition-all ${
-                    index === 0
-                      ? "bg-amber-50 border-amber-400 scale-[1.02] sm:scale-[1.05] shadow-xl"
-                      : "bg-zinc-50 border-zinc-100"
-                  }`}
+                  className="flex justify-between items-center p-5 bg-zinc-50 rounded-[2rem] border-4 border-zinc-100 hover:border-zinc-900 transition-colors"
                 >
-                  <div className="flex items-center gap-5">
-                    <span
-                      className={`w-8 h-8 sm:w-12 sm:h-12 flex items-center justify-center rounded-[0.8rem] sm:rounded-[1.2rem] font-black text-sm sm:text-xl italic shrink-0 ${
-                        index === 0
-                          ? "bg-amber-400 text-white shadow-lg"
-                          : "bg-zinc-200 text-zinc-500"
-                      }`}
-                    >
-                      {index + 1}
-                    </span>
-                    <div className="text-left space-y-0.5 sm:space-y-1 min-w-0">
-                      <p className="text-sm sm:text-xl font-black uppercase italic text-zinc-900 leading-none tracking-tighter truncate">
-                        {group.name}
-                      </p>
-                      <p className="text-[9px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest truncate">
-                        {group.playerIds
-                          .map(
-                            (pid) =>
-                              gameState.players.find((p) => p.id === pid)?.name,
-                          )
-                          .join(" & ")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-2">
-                    <span className="text-2xl sm:text-4xl font-black text-zinc-900 italic leading-none">
+                  <span className="font-black text-zinc-900 uppercase italic tracking-tighter text-xl truncate pr-4">
+                    {group.name}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-3xl font-black text-zinc-900 italic">
                       {group.score}
                     </span>
-                    <span className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pt-1">
                       pts
                     </span>
                   </div>
