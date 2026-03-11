@@ -23,6 +23,7 @@ import {
   Info,
   Pencil,
   Check,
+  RotateCcw,
   AlertTriangle,
 } from "lucide-react";
 
@@ -517,6 +518,37 @@ export default function App() {
     }));
   };
 
+  const resetSystem = async () => {
+    if (
+      !window.confirm(
+        "Are you sure you want to reset everything? All scores and players will be cleared.",
+      )
+    )
+      return;
+
+    try {
+      await fetch("/api/reset-leaderboard", { method: "POST" });
+      setGameState({
+        players: [],
+        groups: [],
+        secretWord: "",
+        category: "",
+        phase: "LOBBY",
+        currentRevealIndex: 0,
+        isWordVisible: false,
+        playerVotes: {},
+        currentVotingPlayerIndex: 0,
+        numImposters: 2,
+        discussionStarterId: null,
+        imposterHintWord: null,
+      });
+      fetchGlobalLeaderboard();
+      alert("System Reset Complete!");
+    } catch (err) {
+      console.error("Reset failed:", err);
+    }
+  };
+
   // --- Sub-renderers ---
 
   const renderLobby = () => (
@@ -843,19 +875,27 @@ export default function App() {
       </div>
 
       <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between overflow-x-auto gap-4 custom-scrollbar">
+          <div className="flex items-center gap-2 shrink-0">
             <Trophy size={20} className="text-amber-500" />
             <h2 className="text-xl font-black uppercase italic tracking-tight">
               All-Time Legends
             </h2>
           </div>
-          <button
-            onClick={fetchGlobalLeaderboard}
-            className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
-          >
-            <RefreshCw size={16} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={resetSystem}
+              className="px-3 py-1.5 bg-red-50 text-red-500 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 border-red-100 hover:bg-red-500 hover:text-white transition-all flex items-center gap-2"
+            >
+              <RotateCcw size={12} /> Reset System
+            </button>
+            <button
+              onClick={fetchGlobalLeaderboard}
+              className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {globalLeaderboard.length > 0 ? (

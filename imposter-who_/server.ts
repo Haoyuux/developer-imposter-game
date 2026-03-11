@@ -36,7 +36,7 @@ const RANDOM_STARTERS = [
   "Generate a diverse list first, then pick from the less obvious ones.",
 ];
 
-// NEW: Strategies to make hints harder
+// Strategies for real hints (diagonal/hard)
 const HINT_STRATEGIES = [
   "Think of where this item is used/found and pick an object from that setting.",
   "Think of an abstract quality or adjective associated with it.",
@@ -60,22 +60,24 @@ async function generateGameData(
   const prompt = `You are picking a word and hints for a party game called "Imposter". [seed:${seed}]
 
 STEP 1: Pick one secret word from the category: "${categoriesStr}"
-RULES for word:
+RULES:
 - ${starter}
 - ${constraint}
 - ${avoidList}
-- Identify what TYPE of thing the word is (e.g. animal, food, sport, tool, etc.)
 
-STEP 2: Generate a slightly challenging ONE-WORD HINT for real players.
-RULES for real hint:
+STEP 2: Generate a challenging ONE-WORD HINT for real players.
+RULES:
 - STRATEGY: ${hintStrategy}
 - ABSOLUTELY AVOID the most obvious/literal association.
-- The hint must be fair but require players to think 'diagonally'.
+- Think 'diagonally'.
 
 STEP 3: Generate a "Fake Hint" for the Imposter.
-RULES for imposter hint:
-- This word should be highly relevant or similar in context to the secret word.
-- Its purpose is to give the Imposter a strong starting point to blend in without knowing the exact word.
+RULES:
+- This word must be DIRECTLY similar or contextually related to the secret word's definition.
+- AVOID puns or homophones (e.g. if word is 'TEA', don't use 'TEE' logic).
+- It should help them blend in by providing a word that is closely semantically linked.
+
+Example: Word: "Violin", Real Hint: "Rosin", Imposter Hint: "Cello" or "Strings".
 
 Return ONLY valid JSON:
 {"word": "secretword", "type": "type", "hint": "realhint", "imposterHint": "fakehint"}`;
@@ -103,7 +105,6 @@ Return ONLY valid JSON:
       imposterHint: (parsed.imposterHint || parsed.hint).toLowerCase(),
     };
   } catch (err: any) {
-    console.warn("[NeuralBrain] Local gen failed, attempting discovery...");
     let modelToUse = "gemini-1.5-flash";
     const modelsIterator = await ai.models.list();
     for await (const m of modelsIterator) {
@@ -112,7 +113,6 @@ Return ONLY valid JSON:
         break;
       }
     }
-
     const parsed = await getAIResult(modelToUse);
     return {
       word: parsed.word.toLowerCase(),
