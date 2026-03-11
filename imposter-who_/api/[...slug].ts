@@ -31,7 +31,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({
         status: "ok",
         message: "Neural Core Online",
-        diagnostics: { keyDetected: true, model: "gemini-2.0-flash" },
+        diagnostics: {
+          keyDetected: true,
+          model: "gemini-2.0-flash",
+          keyMasked: masked,
+        },
       });
     } catch (err: any) {
       console.error("[NeuralBrain] AI test failed:", err.message);
