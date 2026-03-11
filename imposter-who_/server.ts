@@ -47,7 +47,7 @@ const HINT_STRATEGIES = [
 
 async function generateGameData(
   categoriesStr: string,
-): Promise<{ word: string; type: string; hint: string }> {
+): Promise<{ word: string; type: string; hint: string; imposterHint: string }> {
   const constraint = pickRandom(RANDOM_CONSTRAINTS);
   const starter = pickRandom(RANDOM_STARTERS);
   const hintStrategy = pickRandom(HINT_STRATEGIES);
@@ -57,7 +57,7 @@ async function generateGameData(
       ? `Do NOT use any of these recently used words: ${recentWords.join(", ")}.`
       : "";
 
-  const prompt = `You are picking a word and a hint for a party game called "Imposter". [seed:${seed}]
+  const prompt = `You are picking a word and hints for a party game called "Imposter". [seed:${seed}]
 
 STEP 1: Pick one secret word from the category: "${categoriesStr}"
 RULES for word:
@@ -66,15 +66,19 @@ RULES for word:
 - ${avoidList}
 - Identify what TYPE of thing the word is (e.g. animal, food, sport, tool, etc.)
 
-STEP 2: Generate a slightly challenging ONE-WORD HINT.
-RULES for hint:
+STEP 2: Generate a slightly challenging ONE-WORD HINT for real players.
+RULES for real hint:
 - STRATEGY: ${hintStrategy}
-- ABSOLUTELY AVOID the most obvious/literal association (e.g. Bird -> Wing, Pizza -> Box).
+- ABSOLUTELY AVOID the most obvious/literal association.
 - The hint must be fair but require players to think 'diagonally'.
-- Do NOT pick another word of the same type.
+
+STEP 3: Generate a "Fake Hint" for the Imposter.
+RULES for imposter hint:
+- This word should be highly relevant or similar in context to the secret word.
+- Its purpose is to give the Imposter a strong starting point to blend in without knowing the exact word.
 
 Return ONLY valid JSON:
-{"word": "secretword", "type": "type", "hint": "hintword"}`;
+{"word": "secretword", "type": "type", "hint": "realhint", "imposterHint": "fakehint"}`;
 
   const getAIResult = async (modelId: string) => {
     const result = await ai.models.generateContent({
@@ -86,7 +90,8 @@ Return ONLY valid JSON:
       .replace(/^```json\s*/i, "")
       .replace(/```$/, "")
       .trim();
-    return JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    return parsed;
   };
 
   try {
@@ -95,6 +100,7 @@ Return ONLY valid JSON:
       word: parsed.word.toLowerCase(),
       type: (parsed.type || "unknown").toLowerCase(),
       hint: parsed.hint.toLowerCase(),
+      imposterHint: (parsed.imposterHint || parsed.hint).toLowerCase(),
     };
   } catch (err: any) {
     console.warn("[NeuralBrain] Local gen failed, attempting discovery...");
@@ -112,6 +118,7 @@ Return ONLY valid JSON:
       word: parsed.word.toLowerCase(),
       type: (parsed.type || "unknown").toLowerCase(),
       hint: parsed.hint.toLowerCase(),
+      imposterHint: (parsed.imposterHint || parsed.hint).toLowerCase(),
     };
   }
 }
@@ -176,12 +183,13 @@ async function startServer() {
       const { categories } = req.body;
       const categoriesStr =
         categories && categories.length > 0 ? categories.join(", ") : "random";
-      const { word, type, hint } = await generateGameData(categoriesStr);
+      const { word, type, hint, imposterHint } =
+        await generateGameData(categoriesStr);
       if (word) {
         recentWords.push(word.toLowerCase());
         if (recentWords.length > MAX_RECENT) recentWords.shift();
       }
-      res.json({ word: word.toLowerCase(), hint });
+      res.json({ word: word.toLowerCase(), hint, imposterHint });
     } catch (err: any) {
       console.error("AI Generation failed:", err);
       res

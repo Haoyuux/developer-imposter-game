@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { GoogleGenAI } from "@google/genai";
 
 // Ephemeral storage for Vercel (resets on cold starts)
-// In production with Vercel, use a real DB like Supabase or Vercel KV for persistent scores.
 let ephemeralLeaderboard: { name: string; score: number }[] = [];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -96,9 +95,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       const { categories = ["random"] } = req.body || {};
+
+      // PROMPT UPDATED: Higher similarity for imposter blending
       const prompt = `Game: "Imposter". Category: "${categories.join(", ")}". 
-      Pick ONE common secret word and one challenging/cryptic hint.
-      Return format: PURE JSON ONLY. e.g. {"word": "pizza", "hint": "box"}`;
+      STEP 1: Pick ONE common secret word.
+      STEP 2: Generate a challenging ONE-WORD hint for the real players (avoiding literal associations).
+      STEP 3: Pick a "Fake Hint" for the Imposter that is closely related or similar in context to the secret word, to help them blend in.
+      
+      Example: 
+      Secret: "Coffee", Real Hint: "Roast", Imposter Hint: "Cappuccino" (similar/related word).
+      
+      Return format: PURE JSON ONLY. e.g. {"word": "pizza", "hint": "crust", "imposterHint": "pepperoni"}`;
 
       const executeGen = async (modelId: string) => {
         const result = await ai.models.generateContent({
@@ -108,12 +115,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const text = (result.text || "")
           .trim()
           .replace(/```json\s*|```\s*/gi, "");
-        return JSON.parse(text);
+        const data = JSON.parse(text);
+        // Ensure we return the 'hint' as 'hint' and 'imposterHint' as 'hint' for the response if needed,
+        // but the frontend uses `data.word` and `data.hint` for the main game.
+        // We'll return them as discrete fields:
+        return data;
       };
 
       try {
         const data = await executeGen("gemini-1.5-flash");
-        return res.status(200).json(data);
+        return res.status(200).json({
+          word: data.word,
+          hint: data.hint, // The real clue
+          imposterHint: data.imposterHint || data.hint, // The blending tip
+        });
       } catch (innerErr) {
         let modelToUse = "";
         const modelsIterator = await ai.models.list();
@@ -125,7 +140,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (!modelToUse) throw new Error("No models available.");
         const data = await executeGen(modelToUse);
-        return res.status(200).json(data);
+        return res.status(200).json({
+          word: data.word,
+          hint: data.hint,
+          imposterHint: data.imposterHint || data.hint,
+        });
       }
     } catch (err: any) {
       return res

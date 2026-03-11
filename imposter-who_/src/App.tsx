@@ -1483,27 +1483,35 @@ export default function App() {
       score: group.score + (groupPoints[group.id] || 0),
     }));
 
-    // Also update backend for top groups
-    updatedGroups.forEach(async (group) => {
-      const roundScore = groupPoints[group.id] || 0;
-      if (roundScore > 0) {
-        try {
-          await fetch("/api/score", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: group.name, score: roundScore }),
-          });
-        } catch (err) {
-          console.error("Failed to update score:", err);
-        }
-      }
-    });
-
     setGameState((prev) => ({
       ...prev,
       groups: updatedGroups,
       phase: "RESULT",
     }));
+
+    // Perform backend updates in the background, then refresh
+    const updateBackend = async () => {
+      try {
+        await Promise.all(
+          updatedGroups.map(async (group) => {
+            const roundScore = groupPoints[group.id] || 0;
+            if (roundScore > 0) {
+              return fetch("/api/score", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: group.name, score: roundScore }),
+              });
+            }
+          }),
+        );
+        // Refresh the leaderboard data so it's ready when they return
+        fetchGlobalLeaderboard();
+      } catch (err) {
+        console.error("Scoring update failed:", err);
+      }
+    };
+
+    updateBackend();
   };
 
   const renderResult = () => {
