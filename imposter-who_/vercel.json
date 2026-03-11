@@ -2,23 +2,23 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/health(.*)",
+      "source": "/api/health",
       "destination": "/api/health.ts"
     },
     {
-      "source": "/api/generate-word(.*)",
+      "source": "/api/generate-word",
       "destination": "/api/generate-word.ts"
     },
     {
-      "source": "/api/leaderboard(.*)",
+      "source": "/api/leaderboard",
       "destination": "/api/leaderboard.ts"
     },
     {
-      "source": "/api/score(.*)",
+      "source": "/api/score",
       "destination": "/api/leaderboard.ts"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
