@@ -4,12 +4,19 @@ import dotenv from "dotenv";
 import Database from "better-sqlite3";
 import path from "path";
 
+// Vercel handles env vars automatically, but dotenv doesn't hurt locally
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({
-  model: "gemini-3.1-flash-lite-preview",
-});
+function getAIModel() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is missing in environment variables.");
+  }
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-lite-preview",
+  });
+}
 
 const app = express();
 app.use(express.json());
@@ -39,6 +46,7 @@ const RANDOM_STARTERS = [
 async function generateGameData(
   categoriesStr: string,
 ): Promise<{ word: string; type: string; hint: string }> {
+  const model = getAIModel();
   const constraint = pickRandom(RANDOM_CONSTRAINTS);
   const starter = pickRandom(RANDOM_STARTERS);
   const seed = Math.floor(Math.random() * 99999);
@@ -111,9 +119,11 @@ try {
 
 app.get("/api/health", async (req, res) => {
   try {
+    const model = getAIModel();
     const result = await model.generateContent("ping");
     const response = await result.response;
-    if (response.text()) {
+    const text = response.text();
+    if (text) {
       return res.json({ status: "ok", message: "AI is ready" });
     }
     throw new Error("Empty response from AI");
