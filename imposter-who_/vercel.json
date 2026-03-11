@@ -2,19 +2,7 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/health",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/api/generate-word",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/api/leaderboard",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/api/score",
+      "source": "/api/:path*",
       "destination": "/api/index.ts"
     },
     {

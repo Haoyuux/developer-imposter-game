@@ -5,18 +5,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, url = "" } = req;
   const apiKey = process.env.GEMINI_API_KEY;
 
-  console.log(`[NeuralBrain] Incoming: ${method} ${url}`);
+  console.log(`[NeuralBrain] Incoming ${method} request to: ${url}`);
 
   // 1. Diagnostics/Health Check
-  if (url.includes("/health")) {
+  if (url.includes("/health") || url.endsWith("/health")) {
     if (!apiKey) {
       console.error("[NeuralBrain] GEMINI_API_KEY IS MISSING!!!");
-      return res
-        .status(500)
-        .json({
-          status: "error",
-          message: "API key is missing in Vercel settings.",
-        });
+      return res.status(500).json({
+        status: "error",
+        message: "API key is missing in Vercel settings.",
+      });
     }
 
     const masked =
@@ -36,18 +34,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     } catch (err: any) {
       console.error("[NeuralBrain] AI test failed:", err.message);
-      return res
-        .status(200)
-        .json({
-          status: "error",
-          message: "API found but AI test failed.",
-          details: err.message,
-        });
+      return res.status(200).json({
+        status: "error",
+        message: "API found but AI test failed.",
+        details: err.message,
+      });
     }
   }
 
   // 2. Word Generation
-  if (url.includes("/generate-word")) {
+  if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       if (!apiKey) throw new Error("API key missing.");
       const { categories = ["random"] } = req.body || {};
@@ -82,14 +78,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // 3. Leaderboard (Stubbed for stability)
-  if (url.includes("/leaderboard")) return res.status(200).json([]);
-  if (url.includes("/score")) return res.status(200).json({ success: true });
+  if (url.includes("/leaderboard") || url.endsWith("/leaderboard"))
+    return res.status(200).json([]);
+  if (url.includes("/score") || url.endsWith("/score"))
+    return res.status(200).json({ success: true });
 
   // Generic Fallback
+  console.log(`[NeuralBrain] Path fallback reached for URL: ${url}`);
   return res.status(200).json({
     message: "Neural Core reached, but route unknown.",
     url: url,
-    advice:
-      "Check your App.tsx fetch paths to match /api/health or /api/generate-word.",
+    method: method,
+    advice: "Check your App.tsx fetch paths. The URL being received is: " + url,
   });
 }
