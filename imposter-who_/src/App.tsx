@@ -185,16 +185,26 @@ export default function App() {
   const checkAiHealth = async () => {
     try {
       const res = await fetch("/api/health");
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}: ${res.statusText}`);
+      }
       const data = await res.json();
-      if (res.ok && data.status === "ok") {
+      if (data.status === "ok") {
         setAiStatus("READY");
       } else {
         setAiStatus("ERROR");
-        setAiError(data.details || data.message || "Unknown AI error");
+        setAiError(
+          data.details || data.message || "AI Service responded with an error",
+        );
       }
     } catch (err: any) {
+      console.error("Health check failed:", err);
       setAiStatus("ERROR");
-      setAiError(err.message || "Failed to reach game server");
+      setAiError(
+        err.name === "SyntaxError"
+          ? "Invalid response from server (possible 404 or backend not running)"
+          : err.message || "Failed to reach game server",
+      );
     }
   };
 
@@ -401,33 +411,34 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ categories: [assignedCategory] }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.word) {
-          generatedWord = data.word;
-        }
-        if (data.hint) {
-          hintWord = data.hint;
-        }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `AI Generation failed (${response.status}). Keep in mind this game requires a running backend.`,
+        );
       }
-    } catch (err) {
+
+      const data = await response.json();
+      if (data.word) {
+        generatedWord = data.word;
+      }
+      if (data.hint) {
+        hintWord = data.hint;
+      }
+
+      if (!generatedWord) {
+        throw new Error("AI returned no word.");
+      }
+    } catch (err: any) {
       console.error("AI word generation failed:", err);
-    }
-
-    // Fallback to local
-    if (!generatedWord) {
-      const words = CATEGORIES[assignedCategory as keyof typeof CATEGORIES];
-      generatedWord = words[Math.floor(Math.random() * words.length)];
-    }
-
-    // Fallback hint — pick from same category but different word
-    if (!hintWord) {
-      const words = CATEGORIES[assignedCategory as keyof typeof CATEGORIES];
-      const possibleHints = words.filter((w) => w !== generatedWord);
-      if (possibleHints.length > 0) {
-        hintWord =
-          possibleHints[Math.floor(Math.random() * possibleHints.length)];
-      }
+      setAiStatus("ERROR");
+      setAiError(
+        err.message ||
+          "AI word generation failed. Please check your API key and connection.",
+      );
+      setIsGenerating(false);
+      return;
     }
 
     setIsGenerating(false);
