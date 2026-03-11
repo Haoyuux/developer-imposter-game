@@ -23,6 +23,7 @@ import {
   Info,
   Pencil,
   Check,
+  AlertTriangle,
 } from "lucide-react";
 
 // --- Types ---
@@ -169,11 +170,33 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [aiStatus, setAiStatus] = useState<"CHECKING" | "READY" | "ERROR">(
+    "CHECKING",
+  );
+  const [aiError, setAiError] = useState<string>("");
+
   // --- Effects ---
 
   useEffect(() => {
+    checkAiHealth();
     fetchGlobalLeaderboard();
   }, []);
+
+  const checkAiHealth = async () => {
+    try {
+      const res = await fetch("/api/health");
+      const data = await res.json();
+      if (res.ok && data.status === "ok") {
+        setAiStatus("READY");
+      } else {
+        setAiStatus("ERROR");
+        setAiError(data.details || data.message || "Unknown AI error");
+      }
+    } catch (err: any) {
+      setAiStatus("ERROR");
+      setAiError(err.message || "Failed to reach game server");
+    }
+  };
 
   const fetchGlobalLeaderboard = async () => {
     try {
@@ -1842,7 +1865,109 @@ export default function App() {
     );
   };
 
+  const renderMaintenance = () => {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-zinc-900 overflow-hidden relative">
+        {/* Decorative background words */}
+        <div className="absolute inset-0 z-0 opacity-[0.05] flex flex-wrap gap-10 p-10 select-none pointer-events-none transform -rotate-12 translate-x-[-10%] translate-y-[-10%] w-[120%] h-[120%]">
+          {Array.from({ length: 40 }).map((_, i) => (
+            <span
+              key={i}
+              className="text-8xl font-black italic uppercase text-white tracking-widest leading-none"
+            >
+              Offline System Failure Error Code 503 Critical
+            </span>
+          ))}
+        </div>
+
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0, y: 40 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          className="bg-white p-8 md:p-16 rounded-[3rem] md:rounded-[5rem] border-8 border-red-500 shadow-[20px_20px_0_#ef4444] max-w-2xl w-full text-center space-y-8 relative z-10"
+        >
+          <motion.div
+            animate={{ rotate: [-5, 5, -5] }}
+            transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+            className="text-9xl mb-4"
+          >
+            🚧
+          </motion.div>
+          <div className="space-y-4">
+            <h1 className="text-4xl md:text-6xl font-black uppercase italic leading-none tracking-tighter text-zinc-900 border-b-8 border-red-500 pb-4 inline-block">
+              AI Service Offline
+            </h1>
+            <p className="text-xl md:text-2xl font-black text-zinc-900 italic uppercase tracking-tight">
+              The neural core is currently unstable.
+            </p>
+            <p className="text-zinc-500 font-medium max-w-md mx-auto leading-relaxed">
+              To play this game, we need a stable connection to the Gemini AI
+              API. Your current connection or API key is not responding
+              correctly.
+            </p>
+          </div>
+
+          <div className="bg-red-50 border-2 border-red-100 p-6 rounded-[2rem] text-left space-y-2">
+            <span className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-2">
+              <AlertTriangle size={14} /> Diagnostic Logic
+            </span>
+            <p className="text-sm font-mono text-red-600 break-words leading-relaxed">
+              {aiError ||
+                "System Error: The AI core is not responding to health pings."}
+            </p>
+          </div>
+
+          <div className="pt-4 space-y-4">
+            <button
+              onClick={() => {
+                setAiStatus("CHECKING");
+                checkAiHealth();
+              }}
+              className="w-full py-6 bg-zinc-900 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] text-lg hover:bg-red-500 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#000] active:shadow-none active:translate-y-2"
+            >
+              <RefreshCw
+                size={24}
+                className={aiStatus === "CHECKING" ? "animate-spin" : ""}
+              />
+              Retry Connection
+            </button>
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em]">
+              Imposter Game v2.1 // System Status: Critical
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  };
+
   // --- Render ---
+
+  if (aiStatus === "CHECKING") {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center text-center p-6">
+        <div className="space-y-8">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+            className="text-8xl"
+          >
+            🌀
+          </motion.div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-black uppercase italic text-zinc-900 tracking-tighter">
+              Booting Neural Core...
+            </h2>
+            <p className="text-zinc-400 font-black text-xs uppercase tracking-widest">
+              Connecting to Gemini AI Gateway
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (aiStatus === "ERROR") {
+    return renderMaintenance();
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans selection:bg-emerald-200">

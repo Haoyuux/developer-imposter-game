@@ -4,14 +4,14 @@ import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const ai = new GoogleGenAI({
-  apiKey:
-    process.env.GEMINI_API_KEY || "AIzaSyAIUBxFAFFmO-zjhQd3Z3BQUgIJhJDZ9lI",
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const model = genAI.getGenerativeModel({
+  model: "gemini-3.1-flash-lite-preview",
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,10 +39,10 @@ const RANDOM_STARTERS = [
   "Generate a diverse list first, then pick from the less obvious ones.",
 ];
 
-// CALL 1: Generate just the word and its type
-async function generateWord(
+// Combined focused call to save quota (1 call instead of 2)
+async function generateGameData(
   categoriesStr: string,
-): Promise<{ word: string; type: string }> {
+): Promise<{ word: string; type: string; hint: string }> {
   const constraint = pickRandom(RANDOM_CONSTRAINTS);
   const starter = pickRandom(RANDOM_STARTERS);
   const seed = Math.floor(Math.random() * 99999);
@@ -51,83 +51,44 @@ async function generateWord(
       ? `Do NOT use any of these recently used words: ${recentWords.join(", ")}.`
       : "";
 
-  const prompt = `You are picking a word for a party game. [seed:${seed}]
+  const prompt = `You are picking a word and a hint for a party game called "Imposter". [seed:${seed}]
 
-Pick one secret word from the category: "${categoriesStr}"
-
-RULES:
+STEP 1: Pick one secret word from the category: "${categoriesStr}"
+RULES for word:
 - ${starter}
 - ${constraint}
 - ${avoidList}
-- Must be a word a 10-year-old would know. Simple, everyday words only.
-- Good examples: dog, pizza, umbrella, bicycle, guitar, dentist, ladder, pillow, mirror.
-- Bad examples: absinthe, theremin, astrolabe, dirigible.
+- Must be a word a 10-year-old would know. Simple, everyday words only. (dog, pizza, guitar, etc.)
+- Identify what TYPE of thing the word is (e.g. animal, food, sport, tool, etc.)
 
-Also identify what TYPE of thing the word is (e.g. animal, food, sport, tool, place, vehicle, etc.)
+STEP 2: Generate a HINT for that word.
+RULES for hint:
+- ONE hint word associated with the secret word but NOT the same type.
+- Example: word: salad, type: food -> hint: "fork" (utensil)
+- Example: word: cheetah, type: animal -> hint: "savanna" (place)
+- DO NOT pick another word of the same type.
 
-Return ONLY valid JSON, no markdown, no explanation:
-{"word": "secretword", "type": "what type of thing it is"}`;
+Return ONLY valid JSON:
+{"word": "secretword", "type": "type", "hint": "hintword"}`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: { temperature: 1.8, topP: 0.95, topK: 64 },
-  });
-
-  const raw = response.text?.trim() ?? "";
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/```$/, "")
-    .trim();
-  return JSON.parse(cleaned);
-}
-
-// CALL 2: Generate the hint knowing the word and its type
-async function generateHint(word: string, type: string): Promise<string> {
-  const prompt = `You are generating a hint for a party game called "Imposter".
-
-The secret word is: "${word}"
-It is a type of: "${type}"
-
-Your job: Give ONE hint word that is ASSOCIATED with "${word}" but is NOT a "${type}".
-
-The hint must come from a completely different category than "${type}".
-It should be something connected to "${word}" — like where it's found, what it's used for, a part of it, or something it produces.
-
-GOOD hints for "${word}" would be things like:
-- A place where you find "${word}"
-- Something "${word}" needs or uses
-- A part or feature of "${word}"
-- Something "${word}" produces or leads to
-
-BAD hints are any other "${type}" — do not pick another ${type} as the hint.
-
-Examples of correct hint logic:
-- word: salad, type: food → hint: "fork" (utensil) or "bowl" (container) or "dressing" (condiment) ✅
-- word: cheetah, type: animal → hint: "savanna" (place) or "spots" (feature) or "speed" (trait) ✅
-- word: soccer, type: sport → hint: "stadium" (place) or "cleats" (equipment) or "penalty" (event) ✅
-
-Examples of wrong hints:
-- word: salad, type: food → hint: "rice" ❌ (also a food)
-- word: cheetah, type: animal → hint: "monkey" ❌ (also an animal)
-- word: soccer, type: sport → hint: "basketball" ❌ (also a sport)
-
-Return ONLY valid JSON, no markdown, no explanation:
-{"hint": "hintword"}`;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: { temperature: 1.2, topP: 0.9, topK: 40 },
-  });
-
-  const raw = response.text?.trim() ?? "";
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/```$/, "")
-    .trim();
-  const parsed = JSON.parse(cleaned);
-  return parsed.hint?.toLowerCase();
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  const raw = response.text().trim();
+  try {
+    const cleaned = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/```$/, "")
+      .trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      word: parsed.word.toLowerCase(),
+      type: parsed.type.toLowerCase(),
+      hint: parsed.hint.toLowerCase(),
+    };
+  } catch (parseErr) {
+    console.error("Failed to parse AI response:", raw);
+    throw new Error(`AI returned invalid JSON: ${raw.slice(0, 100)}...`);
+  }
 }
 
 async function startServer() {
@@ -144,6 +105,25 @@ async function startServer() {
   `);
 
   app.use(express.json());
+
+  app.get("/api/health", async (req, res) => {
+    try {
+      // Test the AI connection with a tiny prompt
+      const result = await model.generateContent("ping");
+      const response = await result.response;
+      if (response.text()) {
+        return res.json({ status: "ok", message: "AI is ready" });
+      }
+      throw new Error("Empty response from AI");
+    } catch (err: any) {
+      console.error("AI Health Check failed:", err);
+      res.status(503).json({
+        status: "error",
+        message: "AI service unavailable",
+        details: err.message,
+      });
+    }
+  });
 
   app.get("/api/leaderboard", (req, res) => {
     const scores = db
@@ -177,10 +157,8 @@ async function startServer() {
       const { categories } = req.body;
       const categoriesStr =
         categories && categories.length > 0 ? categories.join(", ") : "random";
-
-      // Two separate focused calls
-      const { word, type } = await generateWord(categoriesStr);
-      const hint = await generateHint(word.toLowerCase(), type.toLowerCase());
+      // Single combined focused call to save quota
+      const { word, type, hint } = await generateGameData(categoriesStr);
 
       if (word) {
         recentWords.push(word.toLowerCase());
@@ -189,9 +167,19 @@ async function startServer() {
 
       console.log(`Generated: word="${word}" type="${type}" hint="${hint}"`);
       res.json({ word: word.toLowerCase(), hint });
-    } catch (err) {
+    } catch (err: any) {
       console.error("AI Generation failed:", err);
-      res.status(500).json({ error: "Failed to generate word" });
+
+      let errorMessage = "Failed to generate word";
+      if (err.status === 403 || err.message?.includes("leaked")) {
+        errorMessage =
+          "API Key error: Your key is either missing, invalid, or has been reported as leaked. Please update your .env file.";
+      }
+
+      res.status(500).json({
+        error: errorMessage,
+        details: err.message,
+      });
     }
   });
 
