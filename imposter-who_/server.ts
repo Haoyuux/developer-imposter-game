@@ -9,11 +9,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// FORCE API VERSION TO 'v1' FOR STABILITY
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-  apiVersion: "v1",
-});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,13 +67,12 @@ RULES for hint:
 Return ONLY valid JSON:
 {"word": "secretword", "type": "type", "hint": "hintword"}`;
 
-  const result = await ai.models.generateContent({
-    model: "gemini-1.5-flash",
-    contents: prompt,
-  });
-
-  const raw = (result.text || "").trim();
   try {
+    const result = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: prompt,
+    });
+    const raw = (result.text || "").trim();
     const cleaned = raw
       .replace(/^```json\s*/i, "")
       .replace(/```$/, "")
@@ -88,9 +83,42 @@ Return ONLY valid JSON:
       type: parsed.type.toLowerCase(),
       hint: parsed.hint.toLowerCase(),
     };
-  } catch (parseErr) {
-    console.error("Failed to parse AI response:", raw);
-    throw new Error(`AI returned invalid JSON: ${raw.slice(0, 100)}...`);
+  } catch (err: any) {
+    console.warn(
+      "[NeuralBrain] Standard generation failed, attempting discovery...",
+    );
+    let modelToUse = "";
+    const modelsIterator = await ai.models.list();
+    for await (const m of modelsIterator) {
+      if (m.name.includes("flash")) {
+        modelToUse = m.name;
+        break;
+      }
+    }
+    if (!modelToUse) {
+      const secondIterator = await ai.models.list();
+      for await (const m of secondIterator) {
+        modelToUse = m.name;
+        break;
+      }
+    }
+    if (!modelToUse) throw new Error("No usable models found.");
+
+    const result = await ai.models.generateContent({
+      model: modelToUse,
+      contents: prompt,
+    });
+    const raw = (result.text || "").trim();
+    const cleaned = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/```$/, "")
+      .trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      word: parsed.word.toLowerCase(),
+      type: (parsed.type || "unknown").toLowerCase(),
+      hint: parsed.hint.toLowerCase(),
+    };
   }
 }
 
@@ -111,14 +139,13 @@ async function startServer() {
 
   app.get("/api/health", async (req, res) => {
     try {
-      const result = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: "ping",
-      });
-      if (result.text) {
-        return res.json({ status: "ok", message: "AI is ready" });
+      const found: string[] = [];
+      const modelsIterator = await ai.models.list();
+      for await (const m of modelsIterator) {
+        found.push(m.name);
+        if (found.length >= 10) break;
       }
-      throw new Error("Empty response from AI");
+      res.json({ status: "ok", availableModels: found });
     } catch (err: any) {
       console.error("AI Health Check failed:", err);
       res.status(503).json({
@@ -141,7 +168,6 @@ async function startServer() {
   app.post("/api/score", (req, res) => {
     const { name, score } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
-
     const stmt = db.prepare(`
       INSERT INTO leaderboard (team_name, score)
       VALUES (?, ?)
@@ -162,20 +188,16 @@ async function startServer() {
       const categoriesStr =
         categories && categories.length > 0 ? categories.join(", ") : "random";
       const { word, type, hint } = await generateGameData(categoriesStr);
-
       if (word) {
         recentWords.push(word.toLowerCase());
         if (recentWords.length > MAX_RECENT) recentWords.shift();
       }
-
-      console.log(`Generated: word="${word}" type="${type}" hint="${hint}"`);
       res.json({ word: word.toLowerCase(), hint });
     } catch (err: any) {
       console.error("AI Generation failed:", err);
-      res.status(500).json({
-        error: "Failed to generate word",
-        details: err.message,
-      });
+      res
+        .status(500)
+        .json({ error: "Failed to generate word", details: err.message });
     }
   });
 
