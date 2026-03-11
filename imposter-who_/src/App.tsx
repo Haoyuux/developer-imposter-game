@@ -1556,25 +1556,29 @@ export default function App() {
       phase: "RESULT",
     }));
 
-    // Perform backend updates in the background, then refresh
+    // Perform backend updates in a single bulk request, then refresh
     const updateBackend = async () => {
       try {
-        await Promise.all(
-          updatedGroups.map(async (group) => {
+        const batch = updatedGroups
+          .map((group) => {
             const roundScore = groupPoints[group.id] || 0;
-            if (roundScore > 0) {
-              return fetch("/api/score", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: group.name, score: roundScore }),
-              });
-            }
-          }),
-        );
-        // Refresh the leaderboard data so it's ready when they return
-        fetchGlobalLeaderboard();
+            return roundScore > 0
+              ? { name: group.name, score: roundScore }
+              : null;
+          })
+          .filter(Boolean); // Only send winners
+
+        if (batch.length > 0) {
+          await fetch("/api/score", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(batch),
+          });
+          // Small delay to let Vercel state settle before fetching the list
+          setTimeout(fetchGlobalLeaderboard, 500);
+        }
       } catch (err) {
-        console.error("Scoring update failed:", err);
+        console.error("Bulk scoring update failed:", err);
       }
     };
 

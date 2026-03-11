@@ -25,25 +25,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (url.includes("/api/leaderboard") || url.endsWith("/leaderboard")) {
     const sorted = [...ephemeralLeaderboard]
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 20);
     return res.status(200).json(sorted);
   }
 
   if (url.includes("/api/score") || url.endsWith("/score")) {
     if (method === "POST") {
       try {
-        const { name, score } = req.body;
-        if (!name) return res.status(400).json({ error: "Name is required" });
+        const body = req.body;
+        // Support both single object and array of scores for bulk updates
+        const updates = Array.isArray(body) ? body : [body];
 
-        const existing = ephemeralLeaderboard.find(
-          (e) => e.name.toLowerCase() === name.toLowerCase(),
-        );
-        if (existing) {
-          existing.score += score;
-        } else {
-          ephemeralLeaderboard.push({ name, score });
+        for (const { name, score } of updates) {
+          if (!name) continue;
+          const existing = ephemeralLeaderboard.find(
+            (e) => e.name.toLowerCase() === name.toLowerCase(),
+          );
+          if (existing) {
+            existing.score += score;
+          } else {
+            ephemeralLeaderboard.push({ name, score });
+          }
         }
-        return res.status(200).json({ success: true });
+        return res.status(200).json({ success: true, count: updates.length });
       } catch (err: any) {
         return res
           .status(500)
@@ -67,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const modelsIterator = await ai.models.list();
       for await (const m of modelsIterator) {
         found.push(m.name);
-        if (found.length >= 20) break;
+        if (found.length >= 10) break;
       }
 
       return res.status(200).json({
@@ -95,26 +99,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       const { categories = ["random"] } = req.body || {};
-
-      // PROMPT REFINED: Focus on Semantic Similarity within the Category context
       const prompt = `Game: "Imposter". Category Context: "${categories.join(", ")}". 
-      
-      TASK:
-      1. Pick a secret word from this category.
-      2. Provide a "Real Hint" for players: A word that is related but slightly cryptic (diagonal thinking).
-      3. Provide an "Imposter Hint": A word that is a NEAR-SYNONYM or DIRECTLY related in the SAME context.
-      
-      Avoid homophone gaps (e.g. if word is 'Tee' in Golf, do NOT give 'Steep' for Tea).
-      The Imposter Hint must be a word that someone might actually confuse with the secret word or is very close in definition.
-      
-      Example Category: "Drinks"
-      Word: "Espresso", Real Hint: "Shot", Imposter Hint: "Coffee" (Strongly similar).
-      
-      Example Category: "Sports"
-      Word: "Tee", Real Hint: "Fairway", Imposter Hint: "Stand" or "Peg" (Strongly similar).
-
-      Return format: PURE JSON ONLY. 
-      {"word": "...", "hint": "...", "imposterHint": "..."}`;
+      TASK: Pick secret word, Real Hint (cryptic), and Imposter Hint (near-synonym/same context). No puns.
+      Return format: PURE JSON ONLY. {"word": "...", "hint": "...", "imposterHint": "..."}`;
 
       const executeGen = async (modelId: string) => {
         const result = await ai.models.generateContent({
@@ -135,15 +122,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           imposterHint: data.imposterHint || data.hint,
         });
       } catch (innerErr) {
-        let modelToUse = "";
+        // Fallback discovery
         const modelsIterator = await ai.models.list();
+        let modelToUse = "gemini-1.5-flash";
         for await (const m of modelsIterator) {
           if (m.name.includes("flash")) {
             modelToUse = m.name;
             break;
           }
         }
-        if (!modelToUse) throw new Error("No models available.");
         const data = await executeGen(modelToUse);
         return res.status(200).json({
           word: data.word,
