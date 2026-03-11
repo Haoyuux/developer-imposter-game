@@ -117,7 +117,7 @@ try {
   );
 }
 
-app.get("/api/health", async (req, res) => {
+app.get("/health", async (req, res) => {
   try {
     const model = getAIModel();
     const result = await model.generateContent("ping");
@@ -137,7 +137,7 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-app.get("/api/leaderboard", (req, res) => {
+app.get("/leaderboard", (req, res) => {
   if (!db) return res.json([]);
   try {
     const scores = db
@@ -151,7 +151,7 @@ app.get("/api/leaderboard", (req, res) => {
   }
 });
 
-app.post("/api/score", (req, res) => {
+app.post("/score", (req, res) => {
   if (!db) return res.json({ success: true, message: "No persistence" });
   const { name, score } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
@@ -168,7 +168,7 @@ app.post("/api/score", (req, res) => {
   }
 });
 
-app.post("/api/generate-word", async (req, res) => {
+app.post("/generate-word", async (req, res) => {
   try {
     const { categories } = req.body;
     const categoriesStr =
