@@ -24,7 +24,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const found: string[] = [];
       const modelsIterator = await ai.models.list();
 
-      // The SDK returns an async iterator
       for await (const m of modelsIterator) {
         found.push(m.name);
         if (found.length >= 20) break;
@@ -32,10 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       return res.status(200).json({
         status: "ok",
-        message:
-          found.length > 0
-            ? "Neural Core Online (Discovery Success)"
-            : "Neural Core reached but no models found",
+        message: found.length > 0 ? "Neural Core Online" : "No models found",
         diagnostics: {
           keyUsed: masked,
           availableModels: found,
@@ -45,45 +41,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       });
     } catch (err: any) {
-      console.error("[NeuralBrain] Discovery failed:", err.message);
       return res.status(200).json({
         status: "error",
-        message:
-          "Discovery failed. The API key might be invalid or restricted.",
+        message: "Discovery failed.",
         details: err.message,
         keyUsed: masked,
       });
     }
   }
 
-  // 2. Word Generation with Smart Fallback
+  // 2. Word Generation
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       const { categories = ["random"] } = req.body || {};
-      const prompt = `Game: "Imposter". Category: "${categories.join(", ")}". 
-      Generate ONE common secret word and one hint associated with it but NOT the same type.
-      Return format: PURE JSON ONLY. e.g. {"word": "pizza", "hint": "box"}`;
 
-      // Try 1: Standard ID
-      try {
+      // PROMPT UPDATED FOR HARDER HINTS
+      const prompt = `Game: "Imposter". Category: "${categories.join(", ")}". 
+      STEP 1: Pick ONE common secret word.
+      STEP 2: Generate a slightly cryptic/challenging HINT.
+      HINT RULES:
+      - ONE Word only.
+      - AVOID the most obvious or direct association (e.g., if word is 'Coffee', don't use 'Cup' or 'Drink').
+      - Use a 'diagonal' or second-order association (e.g., word: 'Coffee', hint: 'Roast' or 'Morning').
+      - The hint must be fair but require a moment of thought.
+      Return format: PURE JSON ONLY. e.g. {"word": "secret", "hint": "clue"}`;
+
+      // Smart Model Fallback Wrapper
+      const executeGen = async (modelId: string) => {
         const result = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: modelId,
           contents: prompt,
         });
         const text = (result.text || "")
           .trim()
           .replace(/```json\s*|```\s*/gi, "");
-        const data = JSON.parse(text);
+        return JSON.parse(text);
+      };
+
+      try {
+        const data = await executeGen("gemini-1.5-flash");
         return res.status(200).json({
           word: (data.word || "error").toLowerCase(),
           hint: (data.hint || "error").toLowerCase(),
         });
       } catch (innerErr) {
-        console.warn(
-          "[NeuralBrain] Standard model failed, attempting discovery fallback...",
-        );
-
-        // Try 2: Auto-Discovery
+        // Fallback to discovered model
         let modelToUse = "";
         const modelsIterator = await ai.models.list();
         for await (const m of modelsIterator) {
@@ -92,27 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             break;
           }
         }
+        if (!modelToUse) throw new Error("No models available.");
 
-        if (!modelToUse) {
-          // Last ditch effort: pick the very first model available
-          const secondIterator = await ai.models.list();
-          for await (const m of secondIterator) {
-            modelToUse = m.name;
-            break;
-          }
-        }
-
-        if (!modelToUse)
-          throw new Error("No usable models found for this API key.");
-
-        const result = await ai.models.generateContent({
-          model: modelToUse,
-          contents: prompt,
-        });
-        const text = (result.text || "")
-          .trim()
-          .replace(/```json\s*|```\s*/gi, "");
-        const data = JSON.parse(text);
+        const data = await executeGen(modelToUse);
         return res.status(200).json({
           word: (data.word || "error").toLowerCase(),
           hint: (data.hint || "error").toLowerCase(),
@@ -120,16 +104,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (err: any) {
       return res.status(500).json({
-        error: "AI Discovery & Generation failed",
+        error: "AI Generation failed",
         details: err.message,
         keyUsed: masked,
       });
     }
   }
 
-  return res.status(200).json({
-    message: "Neural Core reached, but route unknown.",
-    url: url,
-    keyUsed: masked,
-  });
+  return res.status(200).json({ message: "Neural reached", keyUsed: masked });
 }

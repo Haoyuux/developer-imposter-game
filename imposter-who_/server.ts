@@ -36,11 +36,21 @@ const RANDOM_STARTERS = [
   "Generate a diverse list first, then pick from the less obvious ones.",
 ];
 
+// NEW: Strategies to make hints harder
+const HINT_STRATEGIES = [
+  "Think of where this item is used/found and pick an object from that setting.",
+  "Think of an abstract quality or adjective associated with it.",
+  "Think of a historical fact or a person famous for using this.",
+  "Pick a second-order association (e.g. if word is 'Bee', don't use 'Honey', use 'Hexagon').",
+  "Focus on a specific part or material of the object.",
+];
+
 async function generateGameData(
   categoriesStr: string,
 ): Promise<{ word: string; type: string; hint: string }> {
   const constraint = pickRandom(RANDOM_CONSTRAINTS);
   const starter = pickRandom(RANDOM_STARTERS);
+  const hintStrategy = pickRandom(HINT_STRATEGIES);
   const seed = Math.floor(Math.random() * 99999);
   const avoidList =
     recentWords.length > 0
@@ -54,22 +64,21 @@ RULES for word:
 - ${starter}
 - ${constraint}
 - ${avoidList}
-- Must be a word a 10-year-old would know. Simple, everyday words only. (dog, pizza, guitar, etc.)
 - Identify what TYPE of thing the word is (e.g. animal, food, sport, tool, etc.)
 
-STEP 2: Generate a HINT for that word.
+STEP 2: Generate a slightly challenging ONE-WORD HINT.
 RULES for hint:
-- ONE hint word associated with the secret word but NOT the same type.
-- Example: word: salad, type: food -> hint: "fork" (utensil)
-- Example: word: cheetah, type: animal -> hint: "savanna" (place)
-- DO NOT pick another word of the same type.
+- STRATEGY: ${hintStrategy}
+- ABSOLUTELY AVOID the most obvious/literal association (e.g. Bird -> Wing, Pizza -> Box).
+- The hint must be fair but require players to think 'diagonally'.
+- Do NOT pick another word of the same type.
 
 Return ONLY valid JSON:
 {"word": "secretword", "type": "type", "hint": "hintword"}`;
 
-  try {
+  const getAIResult = async (modelId: string) => {
     const result = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: modelId,
       contents: prompt,
     });
     const raw = (result.text || "").trim();
@@ -77,17 +86,19 @@ Return ONLY valid JSON:
       .replace(/^```json\s*/i, "")
       .replace(/```$/, "")
       .trim();
-    const parsed = JSON.parse(cleaned);
+    return JSON.parse(cleaned);
+  };
+
+  try {
+    const parsed = await getAIResult("gemini-1.5-flash");
     return {
       word: parsed.word.toLowerCase(),
-      type: parsed.type.toLowerCase(),
+      type: (parsed.type || "unknown").toLowerCase(),
       hint: parsed.hint.toLowerCase(),
     };
   } catch (err: any) {
-    console.warn(
-      "[NeuralBrain] Standard generation failed, attempting discovery...",
-    );
-    let modelToUse = "";
+    console.warn("[NeuralBrain] Local gen failed, attempting discovery...");
+    let modelToUse = "gemini-1.5-flash";
     const modelsIterator = await ai.models.list();
     for await (const m of modelsIterator) {
       if (m.name.includes("flash")) {
@@ -95,25 +106,8 @@ Return ONLY valid JSON:
         break;
       }
     }
-    if (!modelToUse) {
-      const secondIterator = await ai.models.list();
-      for await (const m of secondIterator) {
-        modelToUse = m.name;
-        break;
-      }
-    }
-    if (!modelToUse) throw new Error("No usable models found.");
 
-    const result = await ai.models.generateContent({
-      model: modelToUse,
-      contents: prompt,
-    });
-    const raw = (result.text || "").trim();
-    const cleaned = raw
-      .replace(/^```json\s*/i, "")
-      .replace(/```$/, "")
-      .trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = await getAIResult(modelToUse);
     return {
       word: parsed.word.toLowerCase(),
       type: (parsed.type || "unknown").toLowerCase(),
@@ -147,12 +141,7 @@ async function startServer() {
       }
       res.json({ status: "ok", availableModels: found });
     } catch (err: any) {
-      console.error("AI Health Check failed:", err);
-      res.status(503).json({
-        status: "error",
-        message: "AI service unavailable",
-        details: err.message,
-      });
+      res.status(503).json({ status: "error", details: err.message });
     }
   });
 
@@ -215,9 +204,8 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n🚀 Game Server is live!`);
-    console.log(`> Local:   http://localhost:${PORT}`);
-    console.log("");
+    console.log(`\n🚀 Game Server live!`);
+    console.log(`> http://localhost:${PORT}\n`);
   });
 }
 
