@@ -815,24 +815,24 @@ export default function App() {
         </button>
       </div>
 
-      {globalLeaderboard.length > 0 && (
-        <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Trophy size={20} className="text-amber-500" />
-              <h2 className="text-xl font-black uppercase italic tracking-tight">
-                All-Time Legends
-              </h2>
-            </div>
-            <button
-              onClick={fetchGlobalLeaderboard}
-              className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
-            >
-              <RefreshCw size={16} />
-            </button>
+      <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Trophy size={20} className="text-amber-500" />
+            <h2 className="text-xl font-black uppercase italic tracking-tight">
+              All-Time Legends
+            </h2>
           </div>
-          <div className="space-y-2">
-            {globalLeaderboard.map((entry, i) => (
+          <button
+            onClick={fetchGlobalLeaderboard}
+            className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
+          >
+            <RefreshCw size={16} />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {globalLeaderboard.length > 0 ? (
+            globalLeaderboard.map((entry, i) => (
               <div
                 key={i}
                 className="flex justify-between items-center p-3 bg-zinc-50 rounded-xl border-2 border-zinc-100"
@@ -844,10 +844,19 @@ export default function App() {
                   {entry.score} pts
                 </span>
               </div>
-            ))}
-          </div>
+            ))
+          ) : (
+            <div className="text-center py-6 space-y-2 opacity-50">
+              <p className="text-zinc-400 font-bold italic text-sm">
+                No legends yet.
+              </p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
+                Play a game to take the lead!
+              </p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Help Modal */}
       <AnimatePresence>
