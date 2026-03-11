@@ -1,12 +1,51 @@
 @import "tailwindcss";
 
-/* Mobile responsiveness globals */
+/* Global Responsive Base */
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
 html,
 body {
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile */
+  scroll-behavior: smooth;
 }
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent; /* Remove mobile tap highlight */
+}
+
+/* Custom Scrollbar Utility */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
+}
+
+/* Animations */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
 }

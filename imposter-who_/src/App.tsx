@@ -520,21 +520,22 @@ export default function App() {
   // --- Sub-renderers ---
 
   const renderLobby = () => (
-    <div className="max-w-md mx-auto px-4 py-4 sm:p-6 space-y-6 sm:space-y-8">
-      <div className="text-center space-y-4 relative">
+    <div className="max-w-2xl mx-auto px-4 py-4 sm:py-8 lg:py-12 space-y-8 sm:space-y-12">
+      <div className="text-center space-y-6 sm:space-y-8 relative">
         <motion.div
           initial={{ rotate: -5, scale: 0.9 }}
           animate={{ rotate: 0, scale: 1 }}
-          className="inline-block px-4 py-1 bg-emerald-500 text-white rounded-full text-[10px] font-black uppercase tracking-[0.2em] mb-2 shadow-[4px_4px_0_#064e3b]"
+          className="inline-block px-5 py-1.5 bg-emerald-500 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] mb-2 shadow-[4px_4px_0_#064e3b] sm:shadow-[6px_6px_0_#064e3b]"
         >
           Party Game
         </motion.div>
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tighter text-zinc-900 uppercase italic leading-[0.9]">
+        <h1 className="text-4xl xs:text-5xl sm:text-7xl lg:text-8xl font-black tracking-tighter text-zinc-900 uppercase italic leading-[0.85] sm:leading-[0.8]">
           Developers <br />
           <span className="text-emerald-500">Imposter Game</span>
         </h1>
-        <p className="text-zinc-500 font-bold text-xs md:text-sm">
-          A game of deception and groups.
+        <p className="text-zinc-500 font-bold text-xs sm:text-sm md:text-base max-w-sm mx-auto">
+          A high-stakes game of deception, social engineering, and group
+          dynamics.
         </p>
 
         <div className="absolute -top-2 -right-2 flex gap-1">
@@ -554,7 +555,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-6">
+      <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-[10px_10px_0_#18181b] sm:shadow-[20px_20px_0_#18181b] border-4 border-zinc-900 space-y-8">
         <div className="flex bg-zinc-100 p-1 rounded-2xl mb-6 border-4 border-zinc-100 overflow-hidden">
           <button
             onClick={() => setGameMode("TEAM")}
@@ -612,7 +613,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
                   {Array.from({ length: teamSize }).map((_, i) => (
                     <div key={i} className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
@@ -681,7 +682,7 @@ export default function App() {
           </button>
         </form>
 
-        <div className="space-y-3 max-h-72 overflow-y-auto pr-2 custom-scrollbar pt-6 border-t-4 border-zinc-50">
+        <div className="space-y-3 max-h-[40vh] sm:max-h-80 overflow-y-auto pr-2 custom-scrollbar pt-6 border-t-4 border-zinc-50">
           <AnimatePresence mode="popLayout">
             {gameState.groups.map((group) => (
               <motion.div
@@ -764,7 +765,7 @@ export default function App() {
           <span className="font-black uppercase tracking-widest text-zinc-900 text-[10px] md:text-sm block">
             Select Categories
           </span>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
             {Object.keys(CATEGORIES).map((cat) => {
               const isSelected = selectedCategories.includes(cat);
               return (
@@ -1117,21 +1118,22 @@ export default function App() {
   };
 
   const renderClues = () => (
-    <div className="max-w-4xl mx-auto px-4 py-6 sm:p-6 space-y-8 sm:space-y-12 min-h-screen flex flex-col justify-center">
-      <div className="text-center space-y-6">
+    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 lg:py-16 space-y-12 sm:space-y-20 min-h-screen flex flex-col justify-center">
+      <div className="text-center space-y-8 sm:space-y-10">
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="inline-block px-6 py-2 bg-zinc-900 text-white rounded-full text-xs font-black uppercase tracking-[0.3em] shadow-[8px_8px_0_#10b981]"
+          className="inline-block px-8 py-2.5 bg-zinc-900 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.3em] shadow-[6px_6px_0_#10b981] sm:shadow-[10px_10px_0_#10b981]"
         >
           Discussion Phase
         </motion.div>
-        <div className="space-y-2">
-          <h2 className="text-4xl sm:text-5xl md:text-7xl font-black text-zinc-900 uppercase italic tracking-tighter leading-none">
+        <div className="space-y-4">
+          <h2 className="text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85]">
             Speak Your <span className="text-emerald-500">Truth</span>
           </h2>
-          <p className="text-zinc-500 font-black uppercase tracking-widest text-xs">
+          <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px] sm:text-sm">
             Round {gameState.groups.length} • {gameState.players.length} Players
+            👥
           </p>
         </div>
         <div className="space-y-4">
@@ -1155,14 +1157,14 @@ export default function App() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 sm:gap-10">
         {gameState.groups.map((group, index) => (
           <motion.div
             key={group.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
-            className="bg-white rounded-[2rem] md:rounded-[3rem] p-6 md:p-8 shadow-[10px_10px_0_#18181b] md:shadow-[15px_15px_0_#18181b] border-4 border-zinc-900 space-y-8 relative overflow-hidden group hover:-translate-y-2 hover:shadow-[15px_15px_0_#18181b] md:hover:shadow-[20px_20px_0_#18181b] transition-all"
+            className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-[8px_8px_0_#18181b] sm:shadow-[15px_15px_0_#18181b] border-4 border-zinc-900 space-y-8 relative overflow-hidden group hover:-translate-y-2 hover:shadow-[12px_12px_0_#18181b] sm:hover:shadow-[20px_20px_0_#18181b] transition-all"
           >
             {/* Background Number */}
             <div className="absolute -bottom-10 -right-10 text-[12rem] font-black text-zinc-50 opacity-0 group-hover:opacity-100 transition-all duration-500 select-none pointer-events-none italic">
@@ -1278,19 +1280,19 @@ export default function App() {
     };
 
     return (
-      <div className="max-w-2xl mx-auto px-4 pt-8 pb-32 sm:p-6 space-y-8 sm:space-y-12 min-h-screen flex flex-col justify-center">
-        <div className="text-center space-y-8 sm:space-y-12">
+      <div className="max-w-4xl mx-auto px-4 pt-8 pb-40 sm:py-20 space-y-12 sm:space-y-20 min-h-screen flex flex-col justify-center">
+        <div className="text-center space-y-10 sm:space-y-16">
           <motion.div
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="inline-block px-6 py-2 bg-red-500 text-white rounded-full text-xs font-black uppercase tracking-[0.3em] shadow-[8px_8px_0_#000]"
+            className="inline-block px-8 py-3 bg-red-500 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.3em] shadow-[6px_6px_0_#000] sm:shadow-[10px_10px_0_#000]"
           >
             Voting Phase • {gameState.currentVotingPlayerIndex + 1}/
             {gameState.players.length}
           </motion.div>
-          <div className="space-y-4 sm:space-y-6">
-            <h2 className="text-3xl sm:text-5xl md:text-7xl font-black text-zinc-900 uppercase italic tracking-tighter leading-normal sm:leading-none">
-              <span className="text-red-500 underline decoration-4 sm:decoration-8 underline-offset-[4px] sm:underline-offset-8">
+          <div className="space-y-6">
+            <h2 className="text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85] break-words">
+              <span className="text-red-500 underline decoration-8 sm:decoration-[12px] underline-offset-[8px] sm:underline-offset-12">
                 {currentPlayer.name}
               </span>
               's Turn
@@ -1310,7 +1312,7 @@ export default function App() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {gameState.players
             .filter((p) => p.id !== currentPlayer.id)
             .map((player, index) => {
@@ -1325,10 +1327,10 @@ export default function App() {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.1 }}
                   onClick={() => toggleVote(player.id)}
-                  className={`w-full p-6 rounded-[2.5rem] border-4 transition-all text-left flex justify-between items-center group relative overflow-hidden ${
+                  className={`w-full p-6 sm:p-8 rounded-[2.5rem] sm:rounded-[3rem] border-4 transition-all text-left flex justify-between items-center group relative overflow-hidden ${
                     isSelected
-                      ? "bg-zinc-900 border-zinc-900 text-white scale-[1.02] shadow-[12px_12px_0_#ef4444]"
-                      : "bg-white border-zinc-100 text-zinc-900 hover:border-zinc-900 hover:shadow-[10px_10px_0_#18181b]"
+                      ? "bg-zinc-900 border-zinc-900 text-white scale-[1.02] shadow-[8px_8px_0_#ef4444] sm:shadow-[15px_15px_0_#ef4444]"
+                      : "bg-white border-zinc-100 text-zinc-900 hover:border-zinc-900 hover:shadow-[8px_8px_0_#18181b] sm:hover:shadow-[15px_15px_0_#18181b]"
                   }`}
                 >
                   <div className="relative z-10 space-y-2">
@@ -1567,20 +1569,20 @@ export default function App() {
         <motion.div
           initial={{ scale: 0.8, opacity: 0, y: 40 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          className={`p-6 sm:p-8 md:p-16 rounded-[2rem] sm:rounded-[3rem] md:rounded-[5rem] border-4 sm:border-8 shadow-[8px_8px_0_#18181b] sm:shadow-[15px_15px_0_#18181b] md:shadow-[25px_25px_0_#18181b] ${isCorrect ? "bg-emerald-50 border-emerald-500" : "bg-red-50 border-red-500"} space-y-4 sm:space-y-8 relative overflow-hidden`}
+          className={`p-10 sm:p-20 md:p-32 rounded-[3.5rem] sm:rounded-[5rem] lg:rounded-[8rem] border-4 sm:border-8 shadow-[12px_12px_0_#18181b] sm:shadow-[25px_25px_0_#18181b] lg:shadow-[40px_40px_0_#18181b] ${isCorrect ? "bg-emerald-50 border-emerald-500" : "bg-red-50 border-red-500"} space-y-6 sm:space-y-12 relative overflow-hidden`}
         >
           <motion.div
             animate={{ rotate: [0, 15, -15, 0], scale: [1, 1.2, 1] }}
             transition={{ repeat: Infinity, duration: 3 }}
-            className="text-7xl md:text-9xl mb-4 md:mb-6 mt-4 md:mt-0 relative z-10"
+            className="text-8xl sm:text-9xl md:text-[12rem] mb-6 relative z-10"
           >
             {isCorrect ? "🏆" : "🎭"}
           </motion.div>
-          <div className="space-y-4 relative z-10">
+          <div className="space-y-6 relative z-10">
             <h2
-              className={`text-3xl sm:text-5xl md:text-7xl font-black uppercase italic leading-none tracking-tighter ${isCorrect ? "text-emerald-600" : "text-red-600"}`}
+              className={`text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black uppercase italic leading-[0.85] tracking-tighter ${isCorrect ? "text-emerald-600" : "text-red-600"}`}
             >
-              {isCorrect ? "Imposters Caught!" : "Imposters Won!"}
+              {isCorrect ? "Found Them!" : "They Escaped!"}
             </h2>
             <div className="inline-block px-6 py-2 bg-white/50 backdrop-blur-sm rounded-full border-2 border-zinc-200">
               <p className="text-zinc-500 font-black text-sm uppercase tracking-[0.2em]">
@@ -1903,17 +1905,16 @@ export default function App() {
           >
             🚧
           </motion.div>
-          <div className="space-y-4">
-            <h1 className="text-4xl md:text-6xl font-black uppercase italic leading-none tracking-tighter text-zinc-900 border-b-8 border-red-500 pb-4 inline-block">
-              AI Service Offline
+          <div className="space-y-4 px-4">
+            <h1 className="text-3xl sm:text-5xl md:text-7xl font-black uppercase italic leading-[0.85] tracking-tighter text-zinc-900 border-b-4 sm:border-b-8 border-red-500 pb-4 inline-block">
+              Neural Core <br /> Offline
             </h1>
-            <p className="text-xl md:text-2xl font-black text-zinc-900 italic uppercase tracking-tight">
-              The neural core is currently unstable.
+            <p className="text-lg sm:text-2xl font-black text-zinc-900 italic uppercase tracking-tight">
+              Stability Threshold Not Met
             </p>
-            <p className="text-zinc-500 font-medium max-w-md mx-auto leading-relaxed">
-              To play this game, we need a stable connection to the Gemini AI
-              API. Your current connection or API key is not responding
-              correctly.
+            <p className="text-zinc-500 font-bold max-w-sm mx-auto leading-relaxed text-xs sm:text-sm">
+              The game requires a secure link to the Gemini AI API. Your current
+              connection or API key is not responding correctly.
             </p>
           </div>
 
