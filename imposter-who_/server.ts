@@ -21,7 +21,6 @@ const __dirname = path.dirname(__filename);
 const recentWords: string[] = [];
 const MAX_RECENT = 20;
 
-// Random pick helpers
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -59,7 +58,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API routes
   app.get("/api/leaderboard", (req, res) => {
     const scores = db
       .prepare(
@@ -93,17 +91,13 @@ async function startServer() {
       const categoriesStr =
         categories && categories.length > 0 ? categories.join(", ") : "random";
 
-      // Build avoid list from recent words
       const avoidList =
         recentWords.length > 0
           ? `\nDo NOT use any of these recently used words: ${recentWords.join(", ")}.`
           : "";
 
-      // Pick random constraint and starter for variety
       const constraint = pickRandom(RANDOM_CONSTRAINTS);
       const starter = pickRandom(RANDOM_STARTERS);
-
-      // Random seed number to break model determinism
       const seed = Math.floor(Math.random() * 99999);
 
       const prompt = `You are an AI for a social deduction party game called "Imposter". [seed:${seed}]
@@ -111,55 +105,61 @@ async function startServer() {
 Your task: Pick one secret word from the category "${categoriesStr}" and generate a "hint" word for the imposter.
 
 ════════════════════════════════
-WORD SELECTION — BE RANDOM & KEEP IT SIMPLE
+STEP 1 — PICK A WORD (simple & random)
 ════════════════════════════════
 
 ${starter}
-
 ${constraint}${avoidList}
 
-DIFFICULTY RULES (very important):
+DIFFICULTY RULES:
 - The word must be something a 10-year-old would know.
-- Use only common, everyday words that most people encounter in daily life.
-- NO obscure, rare, technical, or niche words (e.g. no "absinthe", "sextant", "clavicle").
-- If you're unsure whether it's too obscure — pick something simpler.
-- Good difficulty examples: dog, pizza, umbrella, bicycle, swimming pool, guitar, dentist, sunset.
-- Bad difficulty examples: absinthe, theremin, astrolabe, mortise, dirigible.
+- Common, everyday words only. No obscure, rare, or technical words.
+- Good: dog, pizza, umbrella, bicycle, guitar, dentist, sunset, ladder, pillow.
+- Bad: absinthe, theremin, astrolabe, dirigible.
 
 ════════════════════════════════
-HINT RULES — READ CAREFULLY
+STEP 2 — IDENTIFY THE WORD'S TYPE
 ════════════════════════════════
 
-The hint must be a RELATED CONCEPT, not another item of the same type.
+Before writing the hint, ask yourself:
+  "What TYPE of thing is my secret word?"
 
-Ask yourself: "Could my hint be found in the same category as the secret word?"
-If YES → your hint is WRONG. Pick a different one.
-If NO  → your hint is correct.
-
-GOOD hints link to:
-  - A place associated with it   → soccer → stadium
-  - Something it uses/needs      → soccer → cleats
-  - A result or byproduct        → apple → cider
-  - Where it comes from          → apple → orchard
-  - An event around it           → soccer → penalty
-
-BAD hints are siblings (same category):
-  - soccer → basketball ❌  (also a sport)
-  - apple → banana ❌       (also a fruit)
-  - guitar → piano ❌       (also an instrument)
-
-More good examples:
-  - soccer   → goalkeeper, penalty, cleats, stadium, halftime
-  - baseball → dugout, innings, pitcher, bleachers
-  - apple    → orchard, cider, pie, tree
-  - shark    → reef, fin, depth
-  - piano    → recital, keys, sonata
+Examples:
+  - cheetah  → it is an ANIMAL
+  - soccer   → it is a SPORT
+  - guitar   → it is a MUSICAL INSTRUMENT
+  - pizza    → it is a FOOD
+  - hammer   → it is a TOOL
 
 ════════════════════════════════
-SELF-CHECK before returning:
-  1. Would a 10-year-old know this word? → If no, REJECT it and pick something simpler.
-  2. Is my hint a type of ${categoriesStr}? → If yes, REJECT it and try again.
-  3. Would someone hearing the hint naturally think of the secret word? → If yes, it's good.
+STEP 3 — GENERATE THE HINT
+════════════════════════════════
+
+The hint must NOT be the same TYPE as the secret word.
+
+  ✅ GOOD — hint is a different type:
+  - cheetah  → savanna   (a PLACE, not an animal)
+  - cheetah  → spots     (a FEATURE, not an animal)
+  - cheetah  → speed     (a TRAIT, not an animal)
+  - soccer   → stadium   (a PLACE, not a sport)
+  - soccer   → cleats    (EQUIPMENT, not a sport)
+  - guitar   → strings   (a PART, not an instrument)
+  - pizza    → oven       (where it's cooked, not a food)
+  - pizza    → crust      (a PART, not a food)
+
+  ❌ BAD — hint is the same type as the secret word:
+  - cheetah  → monkey    ❌ (also an ANIMAL)
+  - cheetah  → lion      ❌ (also an ANIMAL)
+  - soccer   → basketball ❌ (also a SPORT)
+  - guitar   → piano     ❌ (also an INSTRUMENT)
+  - pizza    → burger    ❌ (also a FOOD)
+
+════════════════════════════════
+FINAL CHECK before returning:
+  1. Would a 10-year-old know the secret word? → If no, pick something simpler.
+  2. What TYPE is my secret word? (animal / sport / food / tool / etc.)
+  3. Is my hint the same TYPE? → If yes, REJECT and pick a different hint.
+  4. Does the hint strongly associate with the secret word? → If yes, return it.
 ════════════════════════════════
 
 One-word hints only. Return ONLY valid JSON, no markdown, no explanation:
@@ -176,7 +176,6 @@ One-word hints only. Return ONLY valid JSON, no markdown, no explanation:
       });
 
       const raw = response.text?.trim() ?? "";
-      // Strip markdown code fences if present
       const cleaned = raw
         .replace(/^```json\s*/i, "")
         .replace(/```$/, "")
@@ -185,7 +184,6 @@ One-word hints only. Return ONLY valid JSON, no markdown, no explanation:
       const word = parsed.word?.toLowerCase();
       const hint = parsed.hint?.toLowerCase();
 
-      // Track this word to avoid repetition
       if (word) {
         recentWords.push(word);
         if (recentWords.length > MAX_RECENT) recentWords.shift();
