@@ -16,16 +16,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  const masked =
+    apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
 
   // 1. Diagnostics/Health Check
   if (url.includes("/health") || url.endsWith("/health")) {
-    const masked =
-      apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
     console.log(`[NeuralBrain] Key Check: Found (${masked})`);
 
     try {
       await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-1.5-flash",
         contents: "ping",
       });
       return res.status(200).json({
@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         message: "Neural Core Online",
         diagnostics: {
           keyDetected: true,
-          model: "gemini-2.0-flash",
+          model: "gemini-1.5-flash",
           keyMasked: masked,
         },
       });
@@ -41,8 +41,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[NeuralBrain] AI test failed:", err.message);
       return res.status(200).json({
         status: "error",
-        message: "API found but AI test failed.",
+        message: "API key recognized but Google returned an error.",
         details: err.message,
+        keyUsed: masked,
       });
     }
   }
@@ -58,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Example: {"word": "pizza", "hint": "box"}`;
 
       const result = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-1.5-flash",
         contents: prompt,
       });
 

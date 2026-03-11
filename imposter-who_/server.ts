@@ -69,7 +69,7 @@ Return ONLY valid JSON:
 {"word": "secretword", "type": "type", "hint": "hintword"}`;
 
   const result = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-1.5-flash",
     contents: prompt,
   });
 
@@ -109,7 +109,7 @@ async function startServer() {
   app.get("/api/health", async (req, res) => {
     try {
       const result = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-1.5-flash",
         contents: "ping",
       });
       if (result.text) {
