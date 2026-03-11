@@ -1,8 +1,20 @@
 {
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "source": "/api/health",
+      "destination": "/api/health.ts"
+    },
+    {
+      "source": "/api/generate-word",
+      "destination": "/api/generate-word.ts"
+    },
+    {
+      "source": "/api/leaderboard",
+      "destination": "/api/leaderboard.ts"
+    },
+    {
+      "source": "/api/score",
+      "destination": "/api/leaderboard.ts"
     },
     {
       "source": "/(.*)",
