@@ -1,14 +1,16 @@
 {
   "version": 2,
-  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "destination": "/api/neural-brain.ts"
     },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
