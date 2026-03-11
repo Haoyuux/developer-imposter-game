@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 1. Diagnostics/Health Check
   if (url.includes("/health") || url.endsWith("/health")) {
-    const results: any = {};
+    let errorLog = "";
     const modelsToTry = [
       "gemini-1.5-flash",
       "gemini-1.5-flash-8b",
@@ -43,16 +43,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         });
       } catch (err: any) {
-        results[modelName] = err.message;
+        errorLog += `[${modelName}]: ${err.message}. `;
       }
     }
 
     // If ALL failed:
     return res.status(200).json({
       status: "error",
-      message: "Every model failed on the stable v1 API endpoint.",
+      message: "Neural Core reached, but all models failed on v1 API.",
       keyUsed: masked,
-      details: results,
+      details: errorLog,
     });
   }
 
@@ -90,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // Generic Fallback
   return res.status(200).json({
     message: "Neural Core reached, but route unknown.",
     url: url,
