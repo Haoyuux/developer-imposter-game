@@ -1,16 +1,6 @@
 {
-  "version": 2,
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.ts"
-    },
-    {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
