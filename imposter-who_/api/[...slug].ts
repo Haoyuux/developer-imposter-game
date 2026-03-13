@@ -71,7 +71,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const prompt = `ACT AS THE "BARKADA GAME MASTER" for "Imposter".
       CRITICAL CATEGORY LOCK: The secret word MUST absolutely belong to: "${categories.join(", ")}".
       TASK: Pick a secret word from category, Real Hint, and TWO Imposter Hints (imposterHint and imposterHint2).
-      RULE FOR IMPOSTER HINTS: Distractors from DIFFERENT categories that share THE SAME PHYSICAL ATTRIBUTES (Shape, Color, Container, Texture, or Temperature). (e.g., Word: "Sungka", Hint: "May butas", imposterHint: "Egg Tray", imposterHint2: "Watercolor palette").
+      
+      JSON Schema:
+      {
+        "word": "The secret word",
+        "type": "item type",
+        "hint": "clue for hunters (don't reveal the word)",
+        "imposterHint": "distractor from different category with same physical look",
+        "imposterHint2": "another physical distractor"
+      }
+
+      RULE FOR IMPOSTER HINTS: Distractors from DIFFERENT categories that share THE SAME PHYSICAL ATTRIBUTES (Shape, Color, Container, Texture, or Temperature).
       CRITICAL: Picking a word outside of "${categories.join(", ")}" is a FAILURE. DO NOT pick food if category is Games.
       IMPORTANT: Return ONLY JSON. ALL fields required. NEVER return "Unknown".`;
 
@@ -159,14 +169,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       const data = await executeGen();
-      const rawWord = getVal(data, ["word"]) || "error";
-      const rawHint = getVal(data, ["hint", "playerHint"]) || "clue";
+      const rawWord =
+        getVal(data, ["word", "secretWord", "item", "secret_word"]) || "error";
+      const rawHint =
+        getVal(data, ["hint", "playerHint", "clue", "real_hint"]) || "clue";
+      const rawType = getVal(data, ["type", "category", "kind"]) || "item";
       const rawIH1 =
-        getVal(data, ["imposterHint", "imposter_hint", "distractor1"]) ||
-        rawHint;
+        getVal(data, [
+          "imposterHint",
+          "imposter_hint",
+          "distractor1",
+          "fake_hint1",
+        ]) || rawHint;
       const rawIH2 =
-        getVal(data, ["imposterHint2", "imposter_hint2", "distractor2"]) ||
-        rawIH1;
+        getVal(data, [
+          "imposterHint2",
+          "imposter_hint2",
+          "distractor2",
+          "fake_hint2",
+        ]) || rawIH1;
 
       return res.status(200).json({
         word: sanitize(rawWord, "error").toLowerCase(),
