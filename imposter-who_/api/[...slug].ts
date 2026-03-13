@@ -1,25 +1,18 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenAI } from "@google/genai";
 
 // Ephemeral storage for Vercel (resets on cold starts)
 let ephemeralLeaderboard: { name: string; score: number }[] = [];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, url = "" } = req;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.DEEPSEEK_API_KEY;
 
   if (!apiKey) {
-    return res
-      .status(500)
-      .json({
-        status: "error",
-        message: "API key missing in Vercel settings.",
-      });
+    return res.status(500).json({
+      status: "error",
+      message: "API key missing in Vercel settings.",
+    });
   }
-
-  const ai = new GoogleGenAI({ apiKey });
-  const masked =
-    apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
 
   // 1. Leaderboard Endpoints
   if (url.includes("/api/leaderboard") || url.endsWith("/leaderboard")) {
@@ -33,7 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (method === "POST") {
       try {
         const body = req.body;
-        // Support both single object and array of scores for bulk updates
         const updates = Array.isArray(body) ? body : [body];
 
         for (const { name, score } of updates) {
@@ -64,80 +56,130 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true });
   }
 
-  // 2. Diagnostics & Auto-Discovery
+  // 2. Diagnostics
   if (url.includes("/health") || url.endsWith("/health")) {
-    try {
-      const found: string[] = [];
-      const modelsIterator = await ai.models.list();
-      for await (const m of modelsIterator) {
-        found.push(m.name);
-        if (found.length >= 10) break;
-      }
-
-      return res.status(200).json({
-        status: "ok",
-        message: found.length > 0 ? "Neural Core Online" : "No models found",
-        diagnostics: {
-          keyUsed: masked,
-          availableModels: found,
-          recommendation:
-            found.find((n) => n.includes("flash")) ||
-            (found.length > 0 ? found[0] : "None"),
-        },
-      });
-    } catch (err: any) {
-      return res.status(200).json({
-        status: "error",
-        message: "Discovery failed.",
-        details: err.message,
-        keyUsed: masked,
-      });
-    }
+    return res.status(200).json({
+      status: "ok",
+      message: "Neural Core Online (DeepSeek)",
+    });
   }
 
   // 3. Word Generation
   if (url.includes("/generate-word") || url.endsWith("/generate-word")) {
     try {
       const { categories = ["random"] } = req.body || {};
-      const prompt = `Game: "Imposter". Category Context: "${categories.join(", ")}". 
-      TASK: Pick secret word, Real Hint (cryptic), and Imposter Hint (near-synonym/same context). No puns.
-      Return format: PURE JSON ONLY. {"word": "...", "hint": "...", "imposterHint": "..."}`;
+      const prompt = `ACT AS THE "BARKADA GAME MASTER" for "Imposter".
+      CRITICAL CATEGORY LOCK: The secret word MUST absolutely belong to: "${categories.join(", ")}".
+      TASK: Pick a secret word from category, Real Hint, and TWO Imposter Hints (imposterHint and imposterHint2).
+      RULE FOR IMPOSTER HINTS: Distractors from DIFFERENT categories that share THE SAME PHYSICAL ATTRIBUTES (Shape, Color, Container, Texture, or Temperature). (e.g., Word: "Sungka", Hint: "May butas", imposterHint: "Egg Tray", imposterHint2: "Watercolor palette").
+      CRITICAL: Picking a word outside of "${categories.join(", ")}" is a FAILURE. DO NOT pick food if category is Games.
+      IMPORTANT: Return ONLY JSON. ALL fields required. NEVER return "Unknown".`;
 
-      const executeGen = async (modelId: string) => {
-        const result = await ai.models.generateContent({
-          model: modelId,
-          contents: prompt,
-        });
-        const text = (result.text || "")
-          .trim()
-          .replace(/```json\s*|```\s*/gi, "");
-        return JSON.parse(text);
+      const executeGen = async () => {
+        const response = await fetch(
+          "https://api.deepseek.com/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: "deepseek-chat",
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You are a Game Master for 'Imposter'. Always return valid JSON matching the requested schema.",
+                },
+                { role: "user", content: prompt },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.3,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`DeepSeek API error: ${errText}`);
+        }
+
+        const result = await response.json();
+        let text = result.choices[0].message.content.trim();
+
+        if (text.startsWith("```")) {
+          text = text.replace(/^```[a-z]*\n/i, "").replace(/\n```$/i, "");
+        }
+
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          const match = text.match(/\{[\s\S]*\}/);
+          if (match) {
+            try {
+              return JSON.parse(match[0]);
+            } catch (innerE) {
+              throw innerE;
+            }
+          }
+          throw e;
+        }
       };
 
-      try {
-        const data = await executeGen("gemini-1.5-flash");
-        return res.status(200).json({
-          word: data.word,
-          hint: data.hint,
-          imposterHint: data.imposterHint || data.hint,
-        });
-      } catch (innerErr) {
-        // Fallback discovery
-        const modelsIterator = await ai.models.list();
-        let modelToUse = "gemini-1.5-flash";
-        for await (const m of modelsIterator) {
-          if (m.name.includes("flash")) {
-            modelToUse = m.name;
-            break;
-          }
+      const getVal = (obj: any, keys: string[]) => {
+        for (const k of keys) {
+          if (obj[k]) return obj[k];
+          const found = Object.keys(obj).find(
+            (ok) =>
+              ok.toLowerCase().replace(/[^a-z0-9]/g, "") ===
+              k.toLowerCase().replace(/[^a-z0-9]/g, ""),
+          );
+          if (found) return obj[found];
         }
-        const data = await executeGen(modelToUse);
-        return res.status(200).json({
-          word: data.word,
-          hint: data.hint,
-          imposterHint: data.imposterHint || data.hint,
-        });
-      }
+        return null;
+      };
+
+      const sanitize = (val: any, fallback: string) => {
+        if (!val || typeof val !== "string") return fallback;
+        const lower = val.toLowerCase();
+        const blacklisted = [
+          "unknown",
+          "n/a",
+          "refuse",
+          "placeholder",
+          "none",
+          "error",
+          "clue",
+        ];
+        if (blacklisted.some((b) => lower.includes(b)) || val.length < 2) {
+          return fallback;
+        }
+        return val;
+      };
+
+      const data = await executeGen();
+      const rawWord = getVal(data, ["word"]) || "error";
+      const rawHint = getVal(data, ["hint", "playerHint"]) || "clue";
+      const rawIH1 =
+        getVal(data, ["imposterHint", "imposter_hint", "distractor1"]) ||
+        rawHint;
+      const rawIH2 =
+        getVal(data, ["imposterHint2", "imposter_hint2", "distractor2"]) ||
+        rawIH1;
+
+      return res.status(200).json({
+        word: sanitize(rawWord, "error").toLowerCase(),
+        hint: sanitize(rawHint, "something").toLowerCase(),
+        imposterHint: sanitize(
+          rawIH1,
+          sanitize(rawHint, "object"),
+        ).toLowerCase(),
+        imposterHint2: sanitize(
+          rawIH2,
+          sanitize(rawIH1, "concept"),
+        ).toLowerCase(),
+      });
     } catch (err: any) {
       return res
         .status(500)

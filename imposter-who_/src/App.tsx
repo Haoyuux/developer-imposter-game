@@ -29,7 +29,13 @@ import {
 
 // --- Types ---
 
-type GamePhase = "LOBBY" | "REVEAL" | "CLUES" | "VOTING" | "RESULT";
+type GamePhase =
+  | "LOBBY"
+  | "REVEAL"
+  | "CLUES"
+  | "VOTING"
+  | "RESULT"
+  | "LEADERBOARD";
 
 interface Player {
   id: string;
@@ -56,80 +62,71 @@ interface GameState {
   numImposters: number;
   discussionStarterId: string | null;
   imposterHintWord: string | null;
+  imposterHintWord2: string | null;
 }
 
 // --- Constants ---
 
 const CATEGORIES = {
-  "Everyday Objects": [
-    "chair",
-    "phone",
-    "spoon",
-    "table",
-    "lamp",
-    "clock",
-    "mirror",
-    "wallet",
+  "Everyday Pinoy Objects": [
+    "tabo",
+    "electric fan",
+    "banig",
+    "sari-sari store",
+    "payungan",
+    "tsinelas",
+    "balde",
+    "walis tambo",
   ],
-  Foods: [
-    "burger",
-    "pizza",
-    "rice",
-    "noodles",
-    "taco",
-    "sushi",
-    "bread",
-    "salad",
+  "Pinoy Foods": [
+    "adobo",
+    "sinigang",
+    "balut",
+    "lumpia",
+    "sisig",
+    "halo-halo",
+    "lechon",
+    "kwek-kwek",
   ],
-  Drinks: [
-    "coffee",
-    "milk",
-    "soda",
-    "juice",
-    "tea",
-    "water",
-    "smoothie",
-    "wine",
+  "Pinoy Drinks": [
+    "gulaman",
+    "buko juice",
+    "sago",
+    "taho",
+    "red horse",
+    "gin bilog",
+    "kape barako",
+    "calamansi juice",
   ],
-  Sports: [
+  "Pinoy Games & Sports": [
     "basketball",
-    "soccer",
-    "tennis",
-    "boxing",
-    "golf",
-    "baseball",
-    "swimming",
-    "rugby",
+    "sepak takraw",
+    "patintero",
+    "arnis",
+    "tumbang preso",
+    "piko",
+    "sungka",
+    "sabong",
   ],
-  "Science & Tech": [
-    "computer",
-    "robot",
-    "satellite",
-    "microscope",
-    "telescope",
-    "battery",
-    "internet",
-    "laser",
+  "PH Places & Landmarks": [
+    "boracay",
+    "baguio",
+    "luneta",
+    "mayon",
+    "chocolate hills",
+    "intramuros",
+    "tagaytay",
+    "siargao",
   ],
-  Animals: [
-    "elephant",
-    "penguin",
-    "lion",
-    "kangaroo",
-    "dolphin",
-    "giraffe",
-    "monkey",
-    "cheetah",
-  ],
-  Instruments: [
-    "guitar",
-    "piano",
-    "violin",
-    "drums",
-    "flute",
-    "trumpet",
-    "saxophone",
-    "cello",
+  "Pinoy Icons & Animals": [
+    "kalabaw",
+    "tarsier",
+    "butanding",
+    "philippine eagle",
+    "askal",
+    "maya bird",
+    "jeepney",
+    "tricycle",
   ],
 };
 
@@ -149,6 +146,7 @@ export default function App() {
     numImposters: 2,
     discussionStarterId: null,
     imposterHintWord: null,
+    imposterHintWord2: null,
   });
 
   const [newGroupName, setNewGroupName] = useState("");
@@ -400,8 +398,6 @@ export default function App() {
         ? selectedCategories
         : Object.keys(CATEGORIES);
 
-    let generatedWord = "";
-    let hintWord = "";
     let assignedCategory =
       categoryNames[Math.floor(Math.random() * categoryNames.length)];
 
@@ -421,16 +417,29 @@ export default function App() {
       }
 
       const data = await response.json();
-      if (data.word) {
-        generatedWord = data.word;
-      }
-      if (data.hint) {
-        hintWord = data.hint;
-      }
+      const generatedWord = data.word || "";
+      const imposterHint1 = data.imposterHint || "";
+      const imposterHint2 = data.imposterHint2 || "";
 
       if (!generatedWord) {
         throw new Error("AI returned no word.");
       }
+
+      setGameState((prev) => ({
+        ...prev,
+        players: shuffledPlayers,
+        secretWord: generatedWord,
+        category: assignedCategory,
+        phase: "REVEAL",
+        currentRevealIndex: 0,
+        imposterHintWord: imposterHint1,
+        imposterHintWord2: imposterHint2,
+        playerVotes: {},
+        currentVotingPlayerIndex: 0,
+        discussionStarterId:
+          shuffledPlayers[Math.floor(Math.random() * shuffledPlayers.length)]
+            .id,
+      }));
     } catch (err: any) {
       console.error("AI word generation failed:", err);
       setAiStatus("ERROR");
@@ -443,25 +452,6 @@ export default function App() {
     }
 
     setIsGenerating(false);
-
-    // Pick random player to start
-    const starterId =
-      shuffledPlayers[Math.floor(Math.random() * shuffledPlayers.length)].id;
-
-    setGameState((prev) => ({
-      ...prev,
-      players: shuffledPlayers,
-      groups: prev.groups, // Keep groups as is
-      category: assignedCategory,
-      secretWord: generatedWord,
-      phase: "REVEAL",
-      currentRevealIndex: 0,
-      isWordVisible: false,
-      playerVotes: {},
-      currentVotingPlayerIndex: 0,
-      discussionStarterId: starterId,
-      imposterHintWord: hintWord || "Unknown",
-    }));
   };
 
   const nextReveal = () => {
@@ -551,6 +541,111 @@ export default function App() {
 
   // --- Sub-renderers ---
 
+  const renderLeaderboard = () => {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8 sm:py-12 space-y-12 min-h-screen">
+        <div className="text-center space-y-6">
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="inline-block px-5 py-1.5 bg-amber-500 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] shadow-[4px_4px_0_#92400e]"
+          >
+            Hall of Fame
+          </motion.div>
+          <motion.h1
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="text-6xl sm:text-8xl lg:text-9xl font-black italic tracking-tighter uppercase leading-[0.8] text-zinc-900"
+          >
+            All-Time <br />
+            <span className="text-amber-500">Legends</span>
+          </motion.h1>
+        </div>
+
+        <div className="bg-white rounded-[3rem] sm:rounded-[4rem] p-8 sm:p-12 shadow-[20px_20px_0_#18181b] border-8 border-zinc-900 space-y-8 relative">
+          <button
+            onClick={() =>
+              setGameState((prev) => ({ ...prev, phase: "LOBBY" }))
+            }
+            className="absolute -top-6 -left-0 xs:-left-6 w-14 h-14 bg-zinc-900 text-white rounded-2xl flex items-center justify-center hover:bg-emerald-500 transition-all shadow-[4px_4px_0_#000] hover:scale-110 active:scale-95 z-10"
+          >
+            <RotateCcw size={24} />
+          </button>
+
+          <div className="grid grid-cols-1 gap-4 overflow-y-auto max-h-[60vh] pr-4 custom-scrollbar lg:max-h-[70vh]">
+            {globalLeaderboard.length > 0 ? (
+              globalLeaderboard.map((entry, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="flex items-center justify-between p-6 bg-zinc-50 rounded-[2rem] border-4 border-zinc-100 group hover:border-zinc-900 transition-all hover:translate-x-2"
+                >
+                  <div className="flex items-center gap-6">
+                    <div
+                      className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-xl sm:text-2xl border-4 ${
+                        i === 0
+                          ? "bg-amber-100 border-amber-500 text-amber-600"
+                          : i === 1
+                            ? "bg-zinc-200 border-zinc-400 text-zinc-500"
+                            : i === 2
+                              ? "bg-orange-100 border-orange-400 text-orange-600"
+                              : "bg-white border-zinc-200 text-zinc-400"
+                      }`}
+                    >
+                      {i + 1}
+                    </div>
+                    <span className="text-xl sm:text-3xl font-black text-zinc-900 uppercase tracking-tighter italic truncate max-w-[120px] xs:max-w-[200px] sm:max-w-md">
+                      {entry.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl sm:text-4xl font-black text-emerald-500">
+                      {entry.score}
+                    </span>
+                    <span className="text-[10px] sm:text-xs font-black text-zinc-400 uppercase tracking-widest mt-2 sm:mt-4">
+                      pts
+                    </span>
+                  </div>
+                </motion.div>
+              ))
+            ) : (
+              <div className="text-center py-20 space-y-4">
+                <Trophy
+                  size={80}
+                  className="mx-auto text-zinc-100"
+                  strokeWidth={1}
+                />
+                <p className="text-zinc-400 font-bold italic text-lg uppercase tracking-widest">
+                  No legends yet.
+                </p>
+                <p className="text-zinc-300 font-black text-xs uppercase tracking-[0.2em]">
+                  Start a game to take your place in history!
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col xs:flex-row gap-4 pt-8">
+            <button
+              onClick={fetchGlobalLeaderboard}
+              className="flex-1 py-5 bg-zinc-900 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all flex items-center justify-center gap-3 shadow-[0_6px_0_#000] active:shadow-none active:translate-y-1"
+            >
+              <RefreshCw size={24} /> Refresh Rankings
+            </button>
+            <button
+              onClick={resetSystem}
+              className="px-8 py-5 bg-red-50 text-red-500 rounded-[2rem] font-black uppercase tracking-widest border-4 border-red-100 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-3 active:translate-y-1"
+            >
+              <Trash2 size={24} /> Reset System
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderLobby = () => (
     <div className="max-w-2xl mx-auto px-4 py-4 sm:py-8 lg:py-12 space-y-8 sm:space-y-12">
       <div className="text-center space-y-6 sm:space-y-8 relative">
@@ -571,6 +666,15 @@ export default function App() {
         </p>
 
         <div className="absolute -top-2 -right-2 flex gap-1">
+          <button
+            onClick={() =>
+              setGameState((prev) => ({ ...prev, phase: "LEADERBOARD" }))
+            }
+            title="View Hall of Fame"
+            className="p-2 text-amber-500 hover:text-amber-600 transition-all hover:scale-110 active:scale-95"
+          >
+            <Trophy size={28} fill="currentColor" />
+          </button>
           <button
             onClick={resetGame}
             title="Reset All Data"
@@ -874,57 +978,6 @@ export default function App() {
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] p-8 shadow-[12px_12px_0_#18181b] border-4 border-zinc-900 space-y-4">
-        <div className="flex items-center justify-between overflow-x-auto gap-4 custom-scrollbar">
-          <div className="flex items-center gap-2 shrink-0">
-            <Trophy size={20} className="text-amber-500" />
-            <h2 className="text-xl font-black uppercase italic tracking-tight">
-              All-Time Legends
-            </h2>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={resetSystem}
-              className="px-3 py-1.5 bg-red-50 text-red-500 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 border-red-100 hover:bg-red-500 hover:text-white transition-all flex items-center gap-2"
-            >
-              <RotateCcw size={12} /> Reset System
-            </button>
-            <button
-              onClick={fetchGlobalLeaderboard}
-              className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
-            >
-              <RefreshCw size={16} />
-            </button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          {globalLeaderboard.length > 0 ? (
-            globalLeaderboard.map((entry, i) => (
-              <div
-                key={i}
-                className="flex justify-between items-center p-3 bg-zinc-50 rounded-xl border-2 border-zinc-100"
-              >
-                <span className="font-bold text-zinc-600 truncate max-w-[150px]">
-                  {entry.name}
-                </span>
-                <span className="font-black text-zinc-900">
-                  {entry.score} pts
-                </span>
-              </div>
-            ))
-          ) : (
-            <div className="text-center py-6 space-y-2 opacity-50">
-              <p className="text-zinc-400 font-bold italic text-sm">
-                No legends yet.
-              </p>
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
-                Play a game to take the lead!
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Help Modal */}
       <AnimatePresence>
         {showHelp && (
@@ -1156,14 +1209,20 @@ export default function App() {
                       </p>
                       <div className="bg-white rounded-xl border-2 border-red-100 p-2 text-left space-y-1">
                         <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
-                          Blending Tip 🎭
+                          Imposter Hints 🎭
                         </p>
-                        <p className="text-zinc-700 font-bold text-xs">
-                          Think of words like{" "}
-                          <span className="text-red-500 font-black">
-                            "{gameState.imposterHintWord}"
-                          </span>{" "}
-                          to blend in.
+                        <div className="flex flex-wrap gap-1">
+                          <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg font-black text-[11px] border border-red-100">
+                            {gameState.imposterHintWord}
+                          </span>
+                          {gameState.imposterHintWord2 && (
+                            <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg font-black text-[11px] border border-red-100">
+                              {gameState.imposterHintWord2}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-zinc-500 font-medium text-[10px] italic">
+                          Blend in using these related concepts.
                         </p>
                       </div>
                     </div>
@@ -1559,14 +1618,10 @@ export default function App() {
     // Perform backend updates in a single bulk request, then refresh
     const updateBackend = async () => {
       try {
-        const batch = updatedGroups
-          .map((group) => {
-            const roundScore = groupPoints[group.id] || 0;
-            return roundScore > 0
-              ? { name: group.name, score: roundScore }
-              : null;
-          })
-          .filter(Boolean); // Only send winners
+        const batch = updatedGroups.map((group) => {
+          const roundScore = groupPoints[group.id] || 0;
+          return { name: group.name, score: roundScore };
+        });
 
         if (batch.length > 0) {
           await fetch("/api/score", {
@@ -1917,11 +1972,11 @@ export default function App() {
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-10"
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 pt-10"
         >
           <button
             onClick={playAgain}
-            className="group py-6 md:py-8 bg-white text-zinc-900 rounded-[2.5rem] md:rounded-[3rem] border-4 border-zinc-900 font-black uppercase italic tracking-[0.2em] text-lg md:text-xl hover:bg-zinc-50 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
+            className="group py-6 md:py-8 bg-white text-zinc-900 rounded-[2.5rem] md:rounded-[3rem] border-4 border-zinc-900 font-black uppercase italic tracking-[0.2em] text-base md:text-xl hover:bg-zinc-50 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
           >
             <RefreshCw
               size={24}
@@ -1930,8 +1985,17 @@ export default function App() {
             Next Round
           </button>
           <button
+            onClick={() =>
+              setGameState((prev) => ({ ...prev, phase: "LEADERBOARD" }))
+            }
+            className="py-6 md:py-8 bg-amber-500 text-white rounded-[2.5rem] md:rounded-[3rem] font-black uppercase italic tracking-[0.2em] text-base md:text-xl hover:bg-amber-600 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#92400e] active:shadow-none active:translate-y-3"
+          >
+            <Trophy size={28} />
+            All-Time
+          </button>
+          <button
             onClick={resetGame}
-            className="py-6 md:py-8 bg-zinc-900 text-white rounded-[2.5rem] md:rounded-[3rem] font-black uppercase italic tracking-[0.2em] text-lg md:text-xl hover:bg-red-500 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
+            className="py-6 md:py-8 bg-zinc-900 text-white rounded-[2.5rem] md:rounded-[3rem] font-black uppercase italic tracking-[0.2em] text-base md:text-xl hover:bg-red-500 transition-all flex items-center justify-center gap-4 shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
           >
             <X size={28} />
             New Lobby
@@ -2103,6 +2167,16 @@ export default function App() {
               animate={{ opacity: 1, scale: 1 }}
             >
               {renderResult()}
+            </motion.div>
+          )}
+          {gameState.phase === "LEADERBOARD" && (
+            <motion.div
+              key="leaderboard"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              {renderLeaderboard()}
             </motion.div>
           )}
         </AnimatePresence>
