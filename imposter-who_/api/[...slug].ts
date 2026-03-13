@@ -74,16 +74,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       JSON Schema:
       {
-        "word": "The secret word",
+        "word": "The secret word (Single word)",
         "type": "item type",
-        "hint": "clue for hunters (don't reveal the word)",
-        "imposterHint": "distractor from different category with same physical look",
-        "imposterHint2": "another physical distractor"
+        "hint": "clue for hunters (Single word/Very short phrase)",
+        "imposterHint": "distractor (Single word ONLY)",
+        "imposterHint2": "another physical distractor (Single word ONLY)"
       }
 
-      RULE FOR IMPOSTER HINTS: Distractors from DIFFERENT categories that share THE SAME PHYSICAL ATTRIBUTES (Shape, Color, Container, Texture, or Temperature).
-      CRITICAL: Picking a word outside of "${categories.join(", ")}" is a FAILURE. DO NOT pick food if category is Games.
-      IMPORTANT: Return ONLY JSON. ALL fields required. NEVER return "Unknown".`;
+      STRICT RULE: Every field MUST be a SINGLE WORD or short phrase. 
+      DO NOT include definitions, descriptions, or explanations.
+      CRITICAL: Picking a word outside of "${categories.join(", ")}" is a FAILURE.
+      IMPORTANT: Return ONLY JSON. NEVER return "Unknown".`;
 
       const executeGen = async () => {
         const response = await fetch(

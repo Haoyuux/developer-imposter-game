@@ -111,12 +111,21 @@ async function generateGameData(categoriesStr: string): Promise<{
   Word: "Kalamansi" (Category: Foods), Hint: "Maliit at bilog", imposterHint: "Suthang" (Category: Objects/Toys), imposterHint2: "Cotton Ball".
   Word: "Sabong" (Category: Games), Hint: "May tari", imposterHint: "Manicure" (Category: Beauty), imposterHint2: "Chef's Knife". (Connects via the 'blade' attribute).
 
+  JSON Schema:
+  {
+    "word": "The secret word (e.g. Sungka)",
+    "type": "item type (e.g. Game)",
+    "hint": "clue for hunters (Single word or short phrase, e.g. Holes)",
+    "imposterHint": "distractor (Single word only, e.g. Egg Tray)",
+    "imposterHint2": "another distractor (Single word only, e.g. Palette)"
+  }
+
   CRITICAL CATEGORY LOCK: The "word" MUST absolutely be an item from the category: "${categoriesStr}". 
-  If the category is "Games", DO NOT pick Food. If the category is "Places", DO NOT pick Animals.
   Choosing a word outside of "${categoriesStr}" is a CRITICAL FAILURE.
 
-  STRICT RULE: Every field in the schema MUST be populated with high-quality content. 
-  NEVER return "Unknown", "N/A", or generic refusal text. If stuck, focus on the physical shape.`;
+  STRICT RULE: Every field MUST be a SINGLE WORD or short phrase. 
+  DO NOT include definitions, descriptions, or explanations.
+  NEVER return "Unknown", "N/A", or generic refusal text.`;
 
   const getAIResult = async () => {
     const schema = {
