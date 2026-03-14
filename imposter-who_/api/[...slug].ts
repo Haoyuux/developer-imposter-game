@@ -1,13 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-// ─── Ephemeral In-Memory Storage (resets on cold starts) ───
-
-let ephemeralLeaderboard: {
-  name: string;
-  score: number;
-  members?: string[];
-  type: string;
-}[] = [];
+// ─── Ephemeral In-Memory Storage ───
+// Uses globalThis to persist data across module reloads within the same Vercel instance.
+// This survives warm invocations but resets on cold starts.
 
 interface EphemeralPlayer {
   name: string;
@@ -29,8 +24,20 @@ interface EphemeralRoom {
   created_at: number;
 }
 
-const rooms: Map<string, EphemeralRoom> = new Map();
-let recentWords: string[] = [];
+// Persist across module reloads using globalThis
+const g = globalThis as any;
+if (!g._ephemeralLeaderboard) g._ephemeralLeaderboard = [];
+if (!g._rooms) g._rooms = new Map();
+if (!g._recentWords) g._recentWords = [];
+
+const ephemeralLeaderboard: {
+  name: string;
+  score: number;
+  members?: string[];
+  type: string;
+}[] = g._ephemeralLeaderboard;
+const rooms: Map<string, EphemeralRoom> = g._rooms;
+let recentWords: string[] = g._recentWords;
 
 // ─── Randomization Helpers ───
 
@@ -324,7 +331,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     url.includes("/api/reset-leaderboard") ||
     url.endsWith("/reset-leaderboard")
   ) {
-    ephemeralLeaderboard = [];
+    ephemeralLeaderboard.length = 0;
+    g._ephemeralLeaderboard = ephemeralLeaderboard;
     rooms.clear();
     return res.status(200).json({ success: true });
   }
@@ -384,6 +392,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       created_at: Date.now(),
     };
     rooms.set(code, room);
+    console.log(
+      `[Room Create] Created room ${code}. Total rooms in memory: ${rooms.size}`,
+    );
     return res.status(200).json({ success: true, code, roomId: code });
   }
 
@@ -432,6 +443,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const room = rooms.get(code);
 
     if (!room) {
+      console.log(
+        `[Room GET] Room ${code} NOT found. Active rooms: [${Array.from(rooms.keys()).join(", ")}]`,
+      );
       return res.status(404).json({ error: "Room not found" });
     }
 
