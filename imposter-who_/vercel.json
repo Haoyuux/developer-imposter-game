@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "regions": ["sin1"],
+  "functions": {
+    "api/[...slug].ts": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/api/:match*",
