@@ -436,10 +436,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // --- Room endpoints with code in URL ---
   // Match /api/rooms/XXXXX or /api/rooms/XXXXX/action
-  const roomMatch = url.match(/\/api\/rooms\/([A-Z0-9]{4,7})(\/(.+))?/i);
+  const roomMatch = url.match(/\/api\/rooms\/([A-Z0-9]{4,7})(?:\/([^?/]+))?/i);
   if (roomMatch) {
     const code = roomMatch[1].toUpperCase();
-    const action = roomMatch[3] || null; // start, vote, leave, kick, state, settings, join-team, play-again
+    const action = roomMatch[2] || null; // start, vote, leave, kick, update-state, settings, join-team, play-again
     const room = rooms.get(code);
 
     if (!room) {
@@ -549,8 +549,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true });
     }
 
-    // --- POST /api/rooms/:code/state ---
-    if (action === "state" && method === "POST") {
+    // --- POST /api/rooms/:code/update-state (also accepts /state) ---
+    if (
+      (action === "update-state" || action === "state") &&
+      method === "POST"
+    ) {
       const { state } = req.body || {};
       if (state) room.state = state;
       return res.status(200).json({ success: true });
