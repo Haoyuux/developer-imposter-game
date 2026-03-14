@@ -25,6 +25,8 @@ import {
   Check,
   RotateCcw,
   AlertTriangle,
+  Ghost,
+  MessageSquare,
 } from "lucide-react";
 
 // --- Types ---
@@ -35,12 +37,16 @@ type GamePhase =
   | "CLUES"
   | "VOTING"
   | "RESULT"
-  | "LEADERBOARD";
+  | "LEADERBOARD"
+  | "REMOTE_LOBBY"
+  | "REMOTE_JOIN";
 
 interface Player {
   id: string;
   name: string;
   isImposter?: boolean;
+  team_name?: string;
+  is_host?: number;
 }
 
 interface Group {
@@ -57,6 +63,7 @@ interface GameState {
   category: string;
   phase: GamePhase;
   currentRevealIndex: number;
+  isWordVisible?: boolean;
   playerVotes: Record<string, string[]>;
   currentVotingPlayerIndex: number;
   numImposters: number;
@@ -150,6 +157,7 @@ export default function App() {
   });
 
   const [newGroupName, setNewGroupName] = useState("");
+  const [newTeamName, setNewTeamName] = useState("");
   const [newPlayerNames, setNewPlayerNames] = useState<Record<number, string>>({
     0: "",
     1: "",
@@ -158,13 +166,13 @@ export default function App() {
     4: "",
   });
   const [teamSize, setTeamSize] = useState(2);
-  const [gameMode, setGameMode] = useState<"TEAM" | "SOLO">("TEAM");
+  const [gameMode, setGameMode] = useState<"TEAM" | "SOLO" | "REMOTE">("TEAM");
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     Object.keys(CATEGORIES),
   );
   const [showHelp, setShowHelp] = useState(false);
   const [globalLeaderboard, setGlobalLeaderboard] = useState<
-    { name: string; score: number }[]
+    { name: string; score: number; members?: string[]; type: string }[]
   >([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -174,12 +182,36 @@ export default function App() {
   );
   const [aiError, setAiError] = useState<string>("");
 
+  // --- Remote Play State ---
+  const [remoteRoom, setRemoteRoom] = useState<any>(null);
+  const [remotePlayerName, setRemotePlayerName] = useState("");
+  const [isRemoteHost, setIsRemoteHost] = useState(false);
+  const [isHostJoined, setIsHostJoined] = useState(true);
+  const [remoteJoinCode, setRemoteJoinCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
+  const [localRemoteVotes, setLocalRemoteVotes] = useState<string[]>([]);
+  const [kickedMessage, setKickedMessage] = useState<string | null>(null);
+  const [remoteLobbyTab, setRemoteLobbyTab] = useState<"PLAYERS" | "BOARD">(
+    "PLAYERS",
+  );
+  const [rankType, setRankType] = useState<"team" | "solo">("team");
+
   // --- Effects ---
 
   useEffect(() => {
     checkAiHealth();
     fetchGlobalLeaderboard();
   }, []);
+
+  useEffect(() => {
+    if (
+      gameState.phase === "LOBBY" ||
+      gameState.phase === "REMOTE_LOBBY" ||
+      gameState.phase === "LEADERBOARD"
+    ) {
+      fetchGlobalLeaderboard();
+    }
+  }, [gameState.phase, rankType]);
 
   const checkAiHealth = async () => {
     try {
@@ -209,7 +241,7 @@ export default function App() {
 
   const fetchGlobalLeaderboard = async () => {
     try {
-      const res = await fetch("/api/leaderboard");
+      const res = await fetch(`/api/leaderboard?type=${rankType}`);
       if (res.ok) {
         const data = await res.json();
         setGlobalLeaderboard(data);
@@ -508,6 +540,454 @@ export default function App() {
     }));
   };
 
+  // --- Remote Play Effects ---
+
+  useEffect(() => {
+    let interval: any;
+    if (remoteRoom?.code) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(
+            `/api/rooms/${remoteRoom.code}?name=${remotePlayerName}`,
+          );
+          if (res.status === 401) {
+            setRemoteRoom(null);
+            setGameState((prev) => ({ ...prev, phase: "LOBBY" }));
+            setKickedMessage(
+              "You have been removed from the room by the host.",
+            );
+            // auto-clear message after 5 seconds
+            setTimeout(() => setKickedMessage(null), 5000);
+            return;
+          }
+
+          if (res.ok) {
+            const data = await res.json();
+            setRemoteRoom(data);
+
+            const isPresent = data.players.some(
+              (p: any) => p.name === remotePlayerName,
+            );
+
+            // If I'm not in the player list and I'm not the host who chose not to join,
+            // or if I was simply kicked.
+            if (!isPresent && !isRemoteHost && gameState.phase !== "LOBBY") {
+              setRemoteRoom(null);
+              setGameState((prev) => ({ ...prev, phase: "LOBBY" }));
+              setKickedMessage("You have been removed from the room.");
+              setTimeout(() => setKickedMessage(null), 5000);
+              return;
+            }
+
+            // Sync GameState with Room State
+            const mappedPlayers = data.players.map((p: any) => ({
+              id: p.name,
+              name: p.name,
+              isImposter: p.role === "imposter",
+              team_name: p.team_name,
+              is_host: p.is_host,
+            }));
+
+            const remoteVotes: Record<string, string[]> = {};
+            data.players.forEach((p: any) => {
+              if (p.vote) {
+                remoteVotes[p.name] = p.vote.includes(",")
+                  ? p.vote.split(",")
+                  : [p.vote];
+              }
+            });
+
+            const serverPhase =
+              data.state === "lobby"
+                ? "REMOTE_LOBBY"
+                : (data.state.toUpperCase() as GamePhase);
+
+            setGameState((prev) => ({
+              ...prev,
+              phase:
+                prev.phase === "LEADERBOARD" && serverPhase === "REMOTE_LOBBY"
+                  ? "LEADERBOARD"
+                  : serverPhase,
+              players: mappedPlayers,
+              playerVotes: remoteVotes,
+              numImposters: data.settings?.numImposters || prev.numImposters,
+              secretWord: data.game_data?.word || "",
+              category: data.game_data?.type || "",
+              imposterHintWord: data.game_data?.imposterHint || "",
+              imposterHintWord2: data.game_data?.imposterHint2 || "",
+              discussionStarterId:
+                data.settings?.discussionStarter ||
+                mappedPlayers[0]?.id ||
+                null,
+            }));
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+      }, 2000);
+    }
+    return () => clearInterval(interval);
+  }, [remoteRoom?.code, remotePlayerName]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (remoteRoom?.code && remotePlayerName) {
+        // Send a beacon to the leave endpoint for immediate cleanup
+        const url = `/api/rooms/${remoteRoom.code}/leave`;
+        const data = JSON.stringify({ name: remotePlayerName });
+        const blob = new Blob([data], { type: "application/json" });
+        navigator.sendBeacon(url, blob);
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [remoteRoom?.code, remotePlayerName]);
+
+  const createRemoteRoom = async () => {
+    setIsJoining(true);
+    const hostName = remotePlayerName || "Host";
+    setRemotePlayerName(hostName);
+    try {
+      const res = await fetch("/api/rooms/create", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setRemoteRoom({ code: data.code, players: [], state: "lobby" });
+        setIsRemoteHost(true);
+        setIsHostJoined(true);
+
+        await fetch("/api/rooms/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: data.code,
+            name: hostName,
+            isHost: true,
+          }),
+        });
+
+        setGameState((prev) => ({ ...prev, phase: "REMOTE_LOBBY" }));
+      }
+    } catch (err) {
+      alert("Failed to create room");
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  const joinRemoteRoom = async () => {
+    if (!remoteJoinCode || !remotePlayerName) return;
+    setIsJoining(true);
+    try {
+      const res = await fetch("/api/rooms/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: remoteJoinCode.toUpperCase(),
+          name: remotePlayerName,
+          isHost: false,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRemoteRoom({
+          code: remoteJoinCode.toUpperCase(),
+          players: [],
+          state: "lobby",
+        });
+        setIsRemoteHost(false);
+        setGameState((prev) => ({ ...prev, phase: "REMOTE_LOBBY" }));
+      } else {
+        alert(data.error || "Failed to join room");
+      }
+    } catch (err) {
+      alert("Room not found");
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  const leaveRemoteRoom = async () => {
+    if (!remoteRoom?.code || !remotePlayerName) {
+      setRemoteRoom(null);
+      setGameState((prev) => ({ ...prev, phase: "LOBBY" }));
+      return;
+    }
+
+    try {
+      await fetch(`/api/rooms/${remoteRoom.code}/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: remotePlayerName }),
+      });
+    } catch (err) {
+      console.error("Failed to leave room explicitly:", err);
+    }
+
+    setRemoteRoom(null);
+    setGameState((prev) => ({ ...prev, phase: "LOBBY" }));
+    setLocalRemoteVotes([]);
+  };
+
+  const startRemoteGame = async () => {
+    if (!remoteRoom?.code) return;
+    setIsGenerating(true);
+    try {
+      const res = await fetch(`/api/rooms/${remoteRoom.code}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categories: selectedCategories,
+          numImposters: gameState.numImposters,
+        }),
+      });
+      if (res.ok) {
+        // State will sync via polling or we can force it
+        const statusRes = await fetch(`/api/rooms/${remoteRoom.code}`);
+        const data = await statusRes.json();
+        setRemoteRoom(data);
+      }
+    } catch (err) {
+      alert("Failed to start game");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const updateRemoteState = async (newState: string) => {
+    if (!remoteRoom?.code || !isRemoteHost) return;
+    if (newState === "voting" || newState === "lobby") setLocalRemoteVotes([]);
+    await fetch(`/api/rooms/${remoteRoom.code}/update-state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: newState }),
+    });
+  };
+
+  const submitRemoteVote = async (names: string[]) => {
+    if (!remoteRoom?.code) return;
+    const voteStr = names.join(",");
+    await fetch(`/api/rooms/${remoteRoom.code}/vote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: remotePlayerName, vote: voteStr }),
+    });
+  };
+
+  const joinRemoteTeam = async (team: string) => {
+    if (!remoteRoom?.code) return;
+    const trimmedName = remotePlayerName.trim();
+
+    // Check if player is already in room in the server's view
+    const isPlayerInRoom = remoteRoom.players.some(
+      (p: any) => p.name === trimmedName,
+    );
+    if (!isPlayerInRoom) {
+      await fetch("/api/rooms/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: remoteRoom.code,
+          name: trimmedName,
+          isHost: isRemoteHost,
+        }),
+      });
+      if (isRemoteHost) setIsHostJoined(true);
+    }
+
+    await fetch(`/api/rooms/${remoteRoom.code}/join-team`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmedName, team }),
+    });
+
+    // Force immediate sync
+    const res = await fetch(
+      `/api/rooms/${remoteRoom.code}?name=${encodeURIComponent(trimmedName)}`,
+    );
+    if (res.ok) {
+      const data = await res.json();
+      setRemoteRoom(data);
+    }
+  };
+
+  const handleRemoteReveal = async () => {
+    if (!remoteRoom?.code || !isRemoteHost) return;
+
+    // Calculate points exactly like revealResult does
+    const imposterPlayers = remoteRoom.players.filter(
+      (p: any) => p.role === "imposter",
+    );
+    const imposterIds = imposterPlayers.map((p: any) => p.name);
+    const nonImposterVoters = remoteRoom.players.filter(
+      (p: any) => p.role !== "imposter",
+    );
+
+    const scoresToSubmit: Record<
+      string,
+      { score: number; members: string[]; type: string }
+    > = {};
+
+    nonImposterVoters.forEach((voter: any) => {
+      const votes = voter.vote
+        ? voter.vote.includes(",")
+          ? voter.vote.split(",")
+          : [voter.vote]
+        : [];
+
+      // Points for Hunters
+      const correctCount = votes.filter((v: string) =>
+        imposterIds.includes(v),
+      ).length;
+
+      if (correctCount > 0) {
+        const rawKey = voter.team_name || voter.name;
+        const key = rawKey.trim().toUpperCase();
+        const type = voter.team_name ? "team" : "solo";
+        if (!scoresToSubmit[key])
+          scoresToSubmit[key] = { score: 0, members: [], type };
+        scoresToSubmit[key].score += correctCount;
+        if (!scoresToSubmit[key].members.includes(voter.name)) {
+          scoresToSubmit[key].members.push(voter.name);
+        }
+      }
+
+      // Points for Imposters
+      imposterPlayers.forEach((imp: any) => {
+        if (!votes.includes(imp.name)) {
+          const rawKey = imp.team_name || imp.name;
+          const key = rawKey.trim().toUpperCase();
+          const type = imp.team_name ? "team" : "solo";
+          if (!scoresToSubmit[key])
+            scoresToSubmit[key] = { score: 0, members: [], type };
+          scoresToSubmit[key].score += 1;
+          if (!scoresToSubmit[key].members.includes(imp.name)) {
+            scoresToSubmit[key].members.push(imp.name);
+          }
+        }
+      });
+    });
+
+    const batch = Object.entries(scoresToSubmit).map(([name, data]) => ({
+      name,
+      score: data.score,
+      members: data.members,
+      type: data.type,
+    }));
+
+    console.log("Total impurities identified:", imposterIds);
+    console.log("Calculated score batch:", batch);
+
+    if (batch.length > 0) {
+      try {
+        console.log("Submitting remote scores to leaderboard...");
+        const res = await fetch("/api/score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(batch),
+        });
+        if (res.ok) {
+          console.log("Scores successfully recorded.");
+        }
+        setTimeout(fetchGlobalLeaderboard, 500);
+      } catch (err) {
+        console.error("Failed to submit remote scores:", err);
+      }
+    } else {
+      console.warn("No points were gained this round. Nothing to submit.");
+    }
+
+    await updateRemoteState("result");
+  };
+
+  const kickPlayer = async (name: string) => {
+    if (!remoteRoom?.code || !isRemoteHost) return;
+    try {
+      await fetch(`/api/rooms/${remoteRoom.code}/kick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+    } catch (err) {
+      console.error("Failed to kick player:", err);
+    }
+  };
+
+  const updateRoomSettings = async (settings: any) => {
+    if (!remoteRoom?.code || !isRemoteHost) return;
+    try {
+      await fetch(`/api/rooms/${remoteRoom.code}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+      });
+    } catch (err) {
+      console.error("Failed to update settings:", err);
+    }
+  };
+
+  const toggleHostParticipation = async () => {
+    if (!remoteRoom?.code || !isRemoteHost) return;
+
+    if (isHostJoined) {
+      // Leave
+      try {
+        await fetch(`/api/rooms/${remoteRoom.code}/leave`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: remotePlayerName }),
+        });
+        setIsHostJoined(false);
+      } catch (err) {
+        console.error("Failed to leave participation:", err);
+      }
+    } else {
+      // Join
+      try {
+        const res = await fetch("/api/rooms/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: remoteRoom.code,
+            name: remotePlayerName,
+            isHost: true,
+          }),
+        });
+        if (res.ok) setIsHostJoined(true);
+        else alert("Failed to join as player");
+      } catch (err) {
+        console.error("Failed to join participation:", err);
+      }
+    }
+  };
+
+  const updateRemoteName = async (newName: string) => {
+    if (!remoteRoom?.code || !newName) return;
+    try {
+      const res = await fetch(`/api/rooms/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: remoteRoom.code,
+          name: newName,
+          isHost: isRemoteHost,
+          oldName: remotePlayerName,
+        }),
+      });
+
+      if (res.ok) {
+        setRemotePlayerName(newName);
+        localStorage.setItem("remotePlayerName", newName);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to update name");
+      }
+    } catch (err) {
+      console.error("Failed to update name:", err);
+      alert("Connection error. Could not update name.");
+    }
+  };
+
   const resetSystem = async () => {
     if (
       !window.confirm(
@@ -531,6 +1011,7 @@ export default function App() {
         numImposters: 2,
         discussionStarterId: null,
         imposterHintWord: null,
+        imposterHintWord2: null,
       });
       fetchGlobalLeaderboard();
       alert("System Reset Complete!");
@@ -538,8 +1019,6 @@ export default function App() {
       console.error("Reset failed:", err);
     }
   };
-
-  // --- Sub-renderers ---
 
   const renderLeaderboard = () => {
     return (
@@ -565,12 +1044,38 @@ export default function App() {
         <div className="bg-white rounded-[3rem] sm:rounded-[4rem] p-8 sm:p-12 shadow-[20px_20px_0_#18181b] border-8 border-zinc-900 space-y-8 relative">
           <button
             onClick={() =>
-              setGameState((prev) => ({ ...prev, phase: "LOBBY" }))
+              setGameState((prev) => ({
+                ...prev,
+                phase: remoteRoom ? "REMOTE_LOBBY" : "LOBBY",
+              }))
             }
             className="absolute -top-6 -left-0 xs:-left-6 w-14 h-14 bg-zinc-900 text-white rounded-2xl flex items-center justify-center hover:bg-emerald-500 transition-all shadow-[4px_4px_0_#000] hover:scale-110 active:scale-95 z-10"
           >
             <RotateCcw size={24} />
           </button>
+
+          <div className="flex justify-center gap-4 mb-4">
+            <button
+              onClick={() => setRankType("team")}
+              className={`px-6 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all ${
+                rankType === "team"
+                  ? "bg-zinc-900 text-white shadow-[4px_4px_0_#10b981]"
+                  : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
+              }`}
+            >
+              Elite Teams
+            </button>
+            <button
+              onClick={() => setRankType("solo")}
+              className={`px-6 py-2 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all ${
+                rankType === "solo"
+                  ? "bg-zinc-900 text-white shadow-[4px_4px_0_#10b981]"
+                  : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
+              }`}
+            >
+              Solo Legends
+            </button>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 overflow-y-auto max-h-[60vh] pr-4 custom-scrollbar lg:max-h-[70vh]">
             {globalLeaderboard.length > 0 ? (
@@ -596,9 +1101,18 @@ export default function App() {
                     >
                       {i + 1}
                     </div>
-                    <span className="text-xl sm:text-3xl font-black text-zinc-900 uppercase tracking-tighter italic truncate max-w-[120px] xs:max-w-[200px] sm:max-w-md">
-                      {entry.name}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xl sm:text-3xl font-black text-zinc-900 uppercase tracking-tighter italic truncate max-w-[120px] xs:max-w-[200px] sm:max-w-md">
+                        {entry.name}
+                      </span>
+                      {entry.members &&
+                        entry.members.length > 0 &&
+                        entry.type === "team" && (
+                          <span className="text-[10px] sm:text-xs font-black text-emerald-500 uppercase tracking-widest italic opacity-60">
+                            {entry.members.join(" • ")}
+                          </span>
+                        )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-2xl sm:text-4xl font-black text-emerald-500">
@@ -641,6 +1155,469 @@ export default function App() {
               <Trash2 size={24} /> Reset System
             </button>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRemoteLobby = () => {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-8 space-y-6 lg:space-y-8 min-h-screen">
+        <div className="text-center space-y-4 relative">
+          <div className="absolute -top-1 -right-1 lg:-top-2 lg:-right-2">
+            <button
+              onClick={() =>
+                setGameState((prev) => ({ ...prev, phase: "LEADERBOARD" }))
+              }
+              title="View Global Leaderboard"
+              className="p-1.5 lg:p-2 text-amber-500 hover:text-amber-600 transition-all hover:scale-110 active:scale-95 flex flex-col items-center"
+            >
+              <Trophy size={24} className="lg:w-8 lg:h-8" fill="currentColor" />
+              <span className="text-[6px] lg:text-[8px] font-black uppercase mt-0.5 lg:mt-1">
+                Board
+              </span>
+            </button>
+          </div>
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="inline-block px-4 py-1 lg:px-5 lg:py-1.5 bg-emerald-500 text-white rounded-full text-[10px] lg:text-xs font-black uppercase tracking-[0.2em]"
+          >
+            Lobby Code:{" "}
+            <span className="text-lg lg:text-xl ml-2">{remoteRoom?.code}</span>
+          </motion.div>
+          <h2 className="text-3xl lg:text-5xl font-black text-zinc-900 uppercase italic leading-tight">
+            Waiting for <br />
+            <span className="text-emerald-500">Barkada</span>
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          <div className="space-y-8">
+            {/* Identity Section */}
+            <div className="bg-white rounded-2xl lg:rounded-[2rem] p-5 lg:p-6 shadow-[6px_6px_0_#18181b] lg:shadow-[10px_10px_0_#18181b] border-2 lg:border-4 border-zinc-900 space-y-4">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block px-2">
+                Your Identity
+              </label>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                <input
+                  type="text"
+                  value={remotePlayerName}
+                  onChange={(e) => setRemotePlayerName(e.target.value)}
+                  className="flex-1 px-4 py-3 rounded-xl bg-zinc-50 border-2 border-zinc-100 font-black text-zinc-900 uppercase text-sm lg:text-base"
+                  placeholder="Your Name"
+                />
+                <button
+                  onClick={() => updateRemoteName(remotePlayerName)}
+                  className="px-6 py-3 bg-zinc-900 text-white rounded-xl font-black uppercase text-xs sm:w-auto"
+                >
+                  Update
+                </button>
+              </div>
+              {isRemoteHost && (
+                <button
+                  onClick={toggleHostParticipation}
+                  className={`w-full py-3 rounded-xl font-black uppercase text-xs transition-all border-2 ${isHostJoined ? "bg-red-50 border-red-200 text-red-500" : "bg-emerald-50 border-emerald-200 text-emerald-600"}`}
+                >
+                  {isHostJoined ? "Leave Participation" : "Join Participation"}
+                </button>
+              )}
+            </div>
+
+            {/* Host Settings */}
+            {isRemoteHost && (
+              <div className="bg-white rounded-2xl lg:rounded-[2rem] p-6 lg:p-8 shadow-[8px_8px_0_#18181b] lg:shadow-[15px_15px_0_#18181b] border-4 lg:border-8 border-zinc-900 space-y-6">
+                <h3 className="text-lg lg:text-xl font-black uppercase tracking-tighter italic border-b-4 border-zinc-900 pb-2">
+                  Host Panel
+                </h3>
+                <div className="space-y-3">
+                  <span className="font-black uppercase tracking-widest text-zinc-400 text-[10px] block">
+                    Imposter Count
+                  </span>
+                  <div className="flex flex-wrap gap-2 lg:gap-3">
+                    {[1, 2, 3].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() =>
+                          updateRoomSettings({
+                            ...remoteRoom?.settings,
+                            numImposters: num,
+                          })
+                        }
+                        className={`w-10 h-10 lg:w-12 lg:h-12 rounded-lg lg:rounded-xl font-black transition-all border-2 lg:border-4 flex items-center justify-center text-xs lg:text-base ${
+                          gameState.numImposters === num
+                            ? "bg-zinc-900 border-zinc-900 text-white"
+                            : "bg-zinc-50 border-zinc-100 text-zinc-400"
+                        }`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <span className="font-black uppercase tracking-widest text-zinc-400 text-[10px] block">
+                    Topics
+                  </span>
+                  <div className="grid grid-cols-2 xs:grid-cols-3 sm:flex sm:flex-wrap gap-2">
+                    {Object.keys(CATEGORIES).map((cat) => {
+                      const isSelected = selectedCategories.includes(cat);
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => {
+                            const newSelection = isSelected
+                              ? selectedCategories.filter((c) => c !== cat)
+                              : [...selectedCategories, cat];
+                            setSelectedCategories(newSelection);
+                          }}
+                          className={`px-3 py-2 lg:py-1.5 rounded-lg border-2 transition-all font-black text-[9px] lg:text-[10px] uppercase truncate ${isSelected ? "bg-emerald-500 border-emerald-600 text-white" : "bg-zinc-50 border-zinc-100 text-zinc-400"}`}
+                        >
+                          {cat}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <span className="font-black uppercase tracking-widest text-zinc-400 text-[10px] block">
+                    Manage Teams
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newTeamName}
+                      onChange={(e) => setNewTeamName(e.target.value)}
+                      placeholder="Add Team Name"
+                      className="flex-1 px-4 py-3 rounded-xl bg-zinc-50 border-2 border-zinc-100 font-black text-[11px] uppercase focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newTeamName.trim()) return;
+                        const teams =
+                          remoteRoom?.settings?.availableTeams || [];
+                        if (teams.includes(newTeamName.trim())) return;
+                        updateRoomSettings({
+                          ...remoteRoom?.settings,
+                          availableTeams: [...teams, newTeamName.trim()],
+                        });
+                        setNewTeamName("");
+                      }}
+                      className="px-4 py-3 bg-zinc-900 text-white rounded-xl font-black uppercase text-[11px]"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Main Content (Players & Action) */}
+            <div className="bg-white rounded-[2rem] lg:rounded-[3rem] p-6 lg:p-8 shadow-[10px_10px_0_#18181b] lg:shadow-[20px_20px_0_#18181b] border-4 lg:border-8 border-zinc-900 space-y-6 lg:space-y-8">
+              {(remoteRoom?.settings?.availableTeams || []).length > 0 && (
+                <div className="space-y-4 pb-4 border-b-4 border-zinc-50">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block px-2 text-center italic">
+                    Select Your Team
+                  </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    {remoteRoom.settings.availableTeams.map((team: string) => {
+                      const isMyTeam =
+                        remoteRoom.players.find(
+                          (p: any) => p.name === remotePlayerName,
+                        )?.team_name === team;
+                      return (
+                        <button
+                          key={team}
+                          onClick={() => joinRemoteTeam(team)}
+                          className={`p-4 rounded-2xl border-4 font-black uppercase text-xs transition-all ${
+                            isMyTeam
+                              ? "bg-emerald-500 border-emerald-500 text-white shadow-lg transform scale-[1.02]"
+                              : "bg-zinc-50 border-zinc-100 text-zinc-500 hover:border-zinc-300"
+                          }`}
+                        >
+                          {team}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => joinRemoteTeam("")}
+                      className={`p-4 rounded-2xl border-4 font-black uppercase text-xs transition-all ${
+                        !remoteRoom.players.find(
+                          (p: any) => p.name === remotePlayerName,
+                        )?.team_name
+                          ? "bg-zinc-900 border-zinc-900 text-white shadow-lg"
+                          : "bg-zinc-50 border-zinc-100 text-zinc-300 hover:border-zinc-300"
+                      }`}
+                    >
+                      No Team
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block px-2 italic">
+                  Players Inside ({remoteRoom?.players?.length || 0})
+                </span>
+                <div className="grid grid-cols-1 gap-4">
+                  {remoteRoom?.players?.map((p: any, i: number) => (
+                    <motion.div
+                      key={i}
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border-4 border-zinc-100"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center font-black border-2 border-zinc-100">
+                          {i + 1}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-black text-zinc-900 uppercase">
+                            {p.name}
+                          </span>
+                          {p.team_name && (
+                            <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest italic group-hover:underline">
+                              Team: {p.team_name}
+                            </span>
+                          )}
+                        </div>
+                        {p.is_host === 1 && (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded-lg text-[10px] font-black uppercase">
+                            Host
+                          </span>
+                        )}
+                      </div>
+                      {isRemoteHost && p.name !== remotePlayerName && (
+                        <button
+                          onClick={() => kickPlayer(p.name)}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              {isRemoteHost ? (
+                <button
+                  onClick={startRemoteGame}
+                  disabled={
+                    !remoteRoom?.players ||
+                    remoteRoom.players.length < 3 ||
+                    remoteRoom.players.length <=
+                      (remoteRoom.settings?.numImposters || 1) ||
+                    isGenerating ||
+                    selectedCategories.length === 0
+                  }
+                  className="w-full py-5 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-[0_6px_0_#064e3b] active:shadow-none active:translate-y-1 transition-all disabled:opacity-30 flex items-center justify-center gap-3"
+                >
+                  {isGenerating ? (
+                    <RefreshCw className="animate-spin" />
+                  ) : (
+                    <Play size={24} fill="currentColor" />
+                  )}
+                  {remoteRoom?.players?.length < 3
+                    ? "Need 3+ Players"
+                    : (remoteRoom.settings?.numImposters || 1) >=
+                        (remoteRoom?.players?.length || 0)
+                      ? "Too Many Imposters"
+                      : selectedCategories.length === 0
+                        ? "Select Category"
+                        : "Start Game"}
+                </button>
+              ) : (
+                <div className="text-center p-6 bg-zinc-100 rounded-2xl border-4 border-dashed border-zinc-200">
+                  <p className="text-zinc-500 font-black uppercase tracking-widest text-sm animate-pulse">
+                    Host will start the game soon...
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={leaveRemoteRoom}
+                className="w-full py-4 bg-zinc-100 text-zinc-400 rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-200 transition-all shadow-[0_4px_0_#d4d4d8] active:shadow-none active:translate-y-1"
+              >
+                Leave Lobby
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[2rem] lg:rounded-[3rem] p-6 lg:p-8 shadow-[10px_10px_0_#18181b] lg:shadow-[20px_20px_0_#18181b] border-4 lg:border-8 border-zinc-900 space-y-6">
+            <div className="flex items-center justify-between border-b-4 border-zinc-50 pb-4">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setRankType("team")}
+                  className={`text-[10px] font-black uppercase tracking-widest transition-all ${
+                    rankType === "team"
+                      ? "text-zinc-900 border-b-2 border-zinc-900"
+                      : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  Elite Teams
+                </button>
+                <button
+                  onClick={() => setRankType("solo")}
+                  className={`text-[10px] font-black uppercase tracking-widest transition-all ${
+                    rankType === "solo"
+                      ? "text-zinc-900 border-b-2 border-zinc-900"
+                      : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  Solo Legends
+                </button>
+                <button
+                  onClick={fetchGlobalLeaderboard}
+                  className="p-1 hover:bg-zinc-100 rounded-lg transition-colors text-zinc-400 hover:text-emerald-500"
+                  title="Refresh Rankings"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+              <Trophy
+                size={20}
+                className="lg:w-6 lg:h-6 text-amber-500"
+                fill="currentColor"
+              />
+            </div>
+
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+              {globalLeaderboard.length > 0 ? (
+                globalLeaderboard.slice(0, 10).map((entry, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex justify-between items-center p-4 bg-zinc-50 rounded-2xl border-2 border-zinc-100"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-black border-2 ${
+                          i === 0
+                            ? "bg-amber-100 border-amber-300 text-amber-600"
+                            : i === 1
+                              ? "bg-zinc-100 border-zinc-200 text-zinc-400"
+                              : i === 2
+                                ? "bg-orange-50 border-orange-200 text-orange-600"
+                                : "bg-white border-zinc-100 text-zinc-300"
+                        }`}
+                      >
+                        {i + 1}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-black text-zinc-900 uppercase italic truncate max-w-[150px]">
+                          {entry.name}
+                        </span>
+                        {entry.members &&
+                          entry.members.length > 0 &&
+                          entry.type === "team" && (
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tight truncate max-w-[150px]">
+                              {entry.members.join(", ")}
+                            </span>
+                          )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-2xl font-black text-emerald-500">
+                        {entry.score}
+                      </span>
+                      <span className="text-[8px] font-black text-zinc-300 uppercase mt-1">
+                        pts
+                      </span>
+                    </div>
+                  </motion.div>
+                ))
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-zinc-300 font-bold uppercase tracking-widest italic animate-pulse">
+                    Board is empty
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() =>
+                setGameState((prev) => ({ ...prev, phase: "LEADERBOARD" }))
+              }
+              className="w-full py-4 bg-amber-50 text-amber-600 rounded-2xl font-black uppercase tracking-widest hover:bg-amber-100 transition-all border-2 lg:border-4 border-amber-100 shadow-[0_4px_0_#fef3c7] active:shadow-none active:translate-y-1 text-xs lg:text-sm"
+            >
+              Full Rankings
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRemoteJoin = () => {
+    return (
+      <div className="max-w-md mx-auto px-4 py-8 space-y-6 lg:space-y-8 min-h-screen flex flex-col justify-center">
+        <div className="text-center space-y-4">
+          <h2 className="text-4xl lg:text-6xl font-black text-zinc-900 uppercase italic leading-none">
+            Join <br />
+            <span className="text-emerald-500">Room</span>
+          </h2>
+          <p className="text-zinc-500 font-bold text-sm lg:text-base">
+            Enter the 5-digit code shown on the host's screen.
+          </p>
+        </div>
+
+        <div className="bg-white rounded-2xl lg:rounded-[3rem] p-6 lg:p-8 shadow-[10px_10px_0_#18181b] lg:shadow-[20px_20px_0_#18181b] border-4 lg:border-8 border-zinc-900 space-y-6">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                Room Code
+              </label>
+              <input
+                type="text"
+                value={remoteJoinCode}
+                onChange={(e) =>
+                  setRemoteJoinCode(e.target.value.toUpperCase())
+                }
+                placeholder="ABCDE"
+                maxLength={5}
+                className="w-full px-5 py-4 rounded-xl lg:rounded-2xl bg-zinc-50 border-2 lg:border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-2xl lg:text-3xl text-center tracking-[0.2em] text-zinc-900"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                Your Name
+              </label>
+              <input
+                type="text"
+                value={remotePlayerName}
+                onChange={(e) => setRemotePlayerName(e.target.value)}
+                placeholder="E.g. Pinoy Hunter"
+                className="w-full px-5 py-3 lg:py-4 rounded-xl lg:rounded-2xl bg-zinc-50 border-2 lg:border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 text-sm lg:text-base"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={joinRemoteRoom}
+            disabled={!remoteJoinCode || !remotePlayerName || isJoining}
+            className="w-full py-5 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-[0_6px_0_#064e3b] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center gap-3"
+          >
+            {isJoining ? (
+              <RefreshCw className="animate-spin" />
+            ) : (
+              <ChevronRight size={24} />
+            )}
+            Join Party
+          </button>
+
+          <button
+            onClick={() =>
+              setGameState((prev) => ({ ...prev, phase: "LOBBY" }))
+            }
+            className="w-full py-4 bg-zinc-100 text-zinc-400 rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-200 transition-all shadow-[0_4px_0_#d4d4d8] active:shadow-none active:translate-y-1"
+          >
+            Go Back
+          </button>
         </div>
       </div>
     );
@@ -695,128 +1672,189 @@ export default function App() {
         <div className="flex bg-zinc-100 p-1 rounded-2xl mb-6 border-4 border-zinc-100 overflow-hidden">
           <button
             onClick={() => setGameMode("TEAM")}
-            className={`flex-1 py-3 text-sm font-black uppercase tracking-widest rounded-xl transition-all ${gameMode === "TEAM" ? "bg-white text-zinc-900 shadow-sm border-2 border-zinc-200" : "text-zinc-400 hover:text-zinc-600 border-2 border-transparent"}`}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${gameMode === "TEAM" ? "bg-white text-zinc-900 shadow-sm border-2 border-zinc-200" : "text-zinc-400 hover:text-zinc-600 border-2 border-transparent"}`}
           >
             Team Mode
           </button>
           <button
             onClick={() => setGameMode("SOLO")}
-            className={`flex-1 py-3 text-sm font-black uppercase tracking-widest rounded-xl transition-all ${gameMode === "SOLO" ? "bg-white text-zinc-900 shadow-sm border-2 border-zinc-200" : "text-zinc-400 hover:text-zinc-600 border-2 border-transparent"}`}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${gameMode === "SOLO" ? "bg-white text-zinc-900 shadow-sm border-2 border-zinc-200" : "text-zinc-400 hover:text-zinc-600 border-2 border-transparent"}`}
           >
             Solo Mode
           </button>
+          <button
+            onClick={() => setGameMode("REMOTE")}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${gameMode === "REMOTE" ? "bg-white text-zinc-900 shadow-sm border-2 border-zinc-200" : "text-zinc-400 hover:text-zinc-600 border-2 border-transparent"}`}
+          >
+            Remote Mode
+          </button>
         </div>
 
-        <form onSubmit={addGroup} className="space-y-4">
-          <AnimatePresence mode="popLayout">
-            {gameMode === "TEAM" ? (
-              <motion.div
-                key="team-form"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-4"
-              >
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
-                    Team Identity
-                  </label>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    placeholder="Group Name (e.g. The Legends)"
-                    className="w-full px-5 py-4 rounded-2xl bg-zinc-50 border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 placeholder:text-zinc-300"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
-                    Team Size
-                  </label>
-                  <div className="flex gap-2">
-                    {[2, 3, 4, 5].map((size) => (
-                      <button
-                        key={size}
-                        type="button"
-                        onClick={() => setTeamSize(size)}
-                        className={`flex-1 py-3 rounded-xl border-2 transition-all font-black ${teamSize === size ? "bg-zinc-900 border-zinc-900 text-white shadow-md scale-105" : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:border-zinc-300"}`}
-                      >
-                        {size}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
-                  {Array.from({ length: teamSize }).map((_, i) => (
-                    <div key={i} className="space-y-2">
+        <AnimatePresence mode="wait">
+          {gameMode === "REMOTE" ? (
+            <motion.div
+              key="remote-ui"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="space-y-4"
+            >
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                  Remote Player Name
+                </label>
+                <input
+                  type="text"
+                  value={remotePlayerName}
+                  onChange={(e) => setRemotePlayerName(e.target.value)}
+                  placeholder="Enter your name for remote play..."
+                  className="w-full px-4 py-3 rounded-xl bg-zinc-50 border-2 border-zinc-100 font-black text-zinc-900 uppercase focus:border-emerald-500 focus:outline-none transition-all"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={createRemoteRoom}
+                  disabled={isJoining || !remotePlayerName}
+                  className="py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-[0_4px_0_#064e3b] active:shadow-none active:translate-y-1 flex flex-col items-center justify-center gap-1 disabled:opacity-50"
+                >
+                  <Users size={20} />
+                  <span className="text-[10px]">Host Room</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (!remotePlayerName) {
+                      alert("Please enter a name first");
+                      return;
+                    }
+                    setGameState((prev) => ({ ...prev, phase: "REMOTE_JOIN" }));
+                  }}
+                  className="py-4 bg-zinc-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-[0_4px_0_#000] active:shadow-none active:translate-y-1 flex flex-col items-center justify-center gap-1"
+                >
+                  <ChevronRight size={20} />
+                  <span className="text-[10px]">Join Code</span>
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.form
+              key="local-form"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onSubmit={addGroup}
+              className="space-y-4"
+            >
+              <AnimatePresence mode="popLayout">
+                {gameMode === "TEAM" ? (
+                  <motion.div
+                    key="team-form"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
-                        Player {i + 1}
+                        Team Identity
                       </label>
                       <input
+                        ref={inputRef}
                         type="text"
-                        value={newPlayerNames[i] || ""}
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        placeholder="Group Name (e.g. The Legends)"
+                        className="w-full px-5 py-4 rounded-2xl bg-zinc-50 border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 placeholder:text-zinc-300"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                        Team Size
+                      </label>
+                      <div className="flex gap-2">
+                        {[2, 3, 4, 5].map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            onClick={() => setTeamSize(size)}
+                            className={`flex-1 py-3 rounded-xl border-2 transition-all font-black ${teamSize === size ? "bg-zinc-900 border-zinc-900 text-white shadow-md scale-105" : "bg-zinc-50 border-zinc-200 text-zinc-400 hover:border-zinc-300"}`}
+                          >
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
+                      {Array.from({ length: teamSize }).map((_, i) => (
+                        <div key={i} className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                            Player {i + 1}
+                          </label>
+                          <input
+                            type="text"
+                            value={newPlayerNames[i] || ""}
+                            onChange={(e) =>
+                              setNewPlayerNames((prev) => ({
+                                ...prev,
+                                [i]: e.target.value,
+                              }))
+                            }
+                            placeholder="Name"
+                            className="w-full px-5 py-4 rounded-2xl bg-zinc-50 border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 placeholder:text-zinc-300"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="solo-form"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
+                        Player Name
+                      </label>
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        value={newPlayerNames[0] || ""}
                         onChange={(e) =>
                           setNewPlayerNames((prev) => ({
                             ...prev,
-                            [i]: e.target.value,
+                            0: e.target.value,
                           }))
                         }
                         placeholder="Name"
                         className="w-full px-5 py-4 rounded-2xl bg-zinc-50 border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 placeholder:text-zinc-300"
                       />
                     </div>
-                  ))}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="solo-form"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-4"
-              >
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">
-                    Player Name
-                  </label>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={newPlayerNames[0] || ""}
-                    onChange={(e) =>
-                      setNewPlayerNames((prev) => ({
-                        ...prev,
-                        0: e.target.value,
-                      }))
-                    }
-                    placeholder="Name"
-                    className="w-full px-5 py-4 rounded-2xl bg-zinc-50 border-4 border-zinc-100 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all font-black text-zinc-900 placeholder:text-zinc-300"
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-          <button
-            onClick={addGroup}
-            disabled={
-              gameMode === "TEAM"
-                ? !newGroupName.trim() ||
-                  !Array.from({ length: teamSize }).every((_, i) =>
-                    newPlayerNames[i]?.trim(),
-                  )
-                : !newPlayerNames[0]?.trim()
-            }
-            className="w-full py-4 bg-zinc-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-500 transition-all disabled:opacity-30 disabled:grayscale flex items-center justify-center gap-3 shadow-[0_6px_0_#000] active:shadow-none active:translate-y-1"
-          >
-            <UserPlus size={20} />
-            {gameMode === "TEAM" ? "Register Team" : "Register Player"}
-          </button>
-        </form>
+              <button
+                type="submit"
+                disabled={
+                  gameMode === "TEAM"
+                    ? !newGroupName.trim() ||
+                      !Array.from({ length: teamSize }).every((_, i) =>
+                        newPlayerNames[i]?.trim(),
+                      )
+                    : !newPlayerNames[0]?.trim()
+                }
+                className="w-full py-4 bg-zinc-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-500 transition-all disabled:opacity-30 disabled:grayscale flex items-center justify-center gap-3 shadow-[0_6px_0_#000] active:shadow-none active:translate-y-1"
+              >
+                <UserPlus size={20} />
+                {gameMode === "TEAM" ? "Register Team" : "Register Player"}
+              </button>
+            </motion.form>
+          )}
+        </AnimatePresence>
 
         <div className="space-y-3 max-h-[40vh] sm:max-h-80 overflow-y-auto pr-2 custom-scrollbar pt-6 border-t-4 border-zinc-50">
           <AnimatePresence mode="popLayout">
@@ -1075,6 +2113,128 @@ export default function App() {
   );
 
   const renderReveal = () => {
+    if (remoteRoom) {
+      const myPlayerInfo = remoteRoom.players.find(
+        (p: any) => p.name === remotePlayerName,
+      );
+      const isImposter = myPlayerInfo?.role === "imposter";
+      const progress =
+        (remoteRoom.players.filter((p: any) => p.last_active).length /
+          remoteRoom.players.length) *
+        100;
+
+      return (
+        <div className="max-w-md mx-auto px-4 py-4 sm:p-6 flex flex-col items-center justify-center min-h-screen space-y-8">
+          <div className="w-full space-y-6">
+            <div className="text-center">
+              <div className="inline-block px-3 py-1 bg-zinc-900 text-white rounded-full text-[10px] font-black uppercase tracking-widest mb-2">
+                Mission Briefing • {gameState.category}
+              </div>
+              <h2 className="text-4xl font-black text-zinc-900 uppercase italic tracking-tighter">
+                Secret <span className="text-emerald-500">Identity</span>
+              </h2>
+            </div>
+          </div>
+
+          <motion.div
+            className="w-full bg-white rounded-[3rem] shadow-[20px_20px_0_#18181b] border-8 border-zinc-900 flex flex-col items-center justify-center p-8 relative overflow-hidden"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+          >
+            <AnimatePresence mode="wait">
+              {!gameState.isWordVisible ? (
+                <motion.button
+                  key="hidden"
+                  onClick={() =>
+                    setGameState((prev) => ({ ...prev, isWordVisible: true }))
+                  }
+                  className="flex flex-col items-center gap-6 py-10 text-zinc-300 hover:text-emerald-500 transition-all group"
+                >
+                  <EyeOff
+                    size={100}
+                    strokeWidth={1}
+                    className="group-hover:scale-110 transition-transform"
+                  />
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400 group-hover:text-emerald-500">
+                    Tap to Reveal Identity
+                  </span>
+                </motion.button>
+              ) : (
+                <motion.div
+                  key="revealed"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="flex flex-col items-center gap-6 py-10 w-full"
+                >
+                  {isImposter ? (
+                    <div className="text-center space-y-4">
+                      <div className="w-20 h-20 bg-red-100 rounded-2xl flex items-center justify-center mx-auto border-4 border-red-200">
+                        <Ghost size={40} className="text-red-500" />
+                      </div>
+                      <h3 className="text-5xl font-black text-red-500 uppercase italic tracking-tighter">
+                        IMPOSTER
+                      </h3>
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                        Category: {gameState.category}
+                      </p>
+                      <p className="text-zinc-500 font-bold max-w-xs mx-auto text-sm leading-relaxed underline">
+                        HINT: {gameState.imposterHintWord} &{" "}
+                        {gameState.imposterHintWord2}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-4">
+                      <div className="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto border-4 border-emerald-200">
+                        <Users size={40} className="text-emerald-500" />
+                      </div>
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                        Your Secret Word
+                      </p>
+                      <h3 className="text-5xl font-black text-emerald-500 uppercase italic tracking-tighter">
+                        {gameState.secretWord}
+                      </h3>
+                      <p className="text-zinc-400 font-black uppercase text-xs tracking-widest">
+                        {gameState.category}
+                      </p>
+                    </div>
+                  )}
+                  <button
+                    onClick={() =>
+                      setGameState((prev) => ({
+                        ...prev,
+                        isWordVisible: false,
+                      }))
+                    }
+                    className="mt-4 px-6 py-2 bg-zinc-100 rounded-xl text-[10px] font-black uppercase text-zinc-400 hover:bg-zinc-200"
+                  >
+                    Hide Again
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+
+          {isRemoteHost ? (
+            <button
+              onClick={() => updateRemoteState("clues")}
+              className="w-full py-5 bg-zinc-900 text-white rounded-2xl font-black uppercase tracking-widest shadow-[0_6px_0_#000] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center gap-3"
+            >
+              <RefreshCw size={24} />
+              Start Clues Phase
+            </button>
+          ) : (
+            <div className="text-center p-6 bg-zinc-100/50 rounded-2xl border-4 border-dashed border-zinc-200 w-full">
+              <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px]">
+                Waiting for Host to advance...
+              </p>
+            </div>
+          )}
+
+          {/* Scoreboard removed as per user request */}
+        </div>
+      );
+    }
+
     const currentPlayer = gameState.players[gameState.currentRevealIndex];
 
     const progress =
@@ -1248,132 +2408,427 @@ export default function App() {
           <Info size={14} />
           <span>Don't let others see!</span>
         </div>
+
+        {/* Local Scoreboard removed as per user request */}
       </div>
     );
   };
 
-  const renderClues = () => (
-    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 lg:py-16 space-y-12 sm:space-y-20 min-h-screen">
-      <div className="text-center space-y-8 sm:space-y-10">
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="inline-block px-8 py-2.5 bg-zinc-900 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.3em] shadow-[6px_6px_0_#10b981] sm:shadow-[10px_10px_0_#10b981]"
-        >
-          Discussion Phase
-        </motion.div>
-        <div className="space-y-4">
-          <h2 className="text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85]">
-            Speak Your <span className="text-emerald-500">Truth</span>
-          </h2>
-          <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px] sm:text-sm">
-            Round {gameState.groups.length} • {gameState.players.length} Players
-            👥
-          </p>
-        </div>
-        <div className="space-y-4">
-          <p className="text-zinc-500 font-bold max-w-md mx-auto text-sm sm:text-lg">
-            Each player gives one short clue about the secret word. Don't be too
-            obvious!
-          </p>
-          <div className="inline-flex items-center gap-3 bg-white px-6 py-4 rounded-2xl border-2 border-emerald-500 shadow-[4px_4px_0_#10b981]">
-            <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
-            <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">
-              <span className="text-emerald-600">
-                {
-                  gameState.players.find(
-                    (p) => p.id === gameState.discussionStarterId,
-                  )?.name
-                }
-              </span>{" "}
-              starts the discussion!
-            </p>
+  const renderClues = () => {
+    if (remoteRoom) {
+      return (
+        <div className="max-w-6xl mx-auto px-4 py-8 space-y-12 min-h-screen">
+          <div className="text-center space-y-10">
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="inline-block px-8 py-2.5 bg-zinc-900 text-white rounded-full text-xs font-black uppercase tracking-[0.3em] shadow-[10px_10px_0_#10b981]"
+            >
+              Discussion Phase
+            </motion.div>
+            <div className="space-y-4">
+              <h2 className="text-5xl sm:text-7xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85]">
+                Speak Your <span className="text-emerald-500">Truth</span>
+              </h2>
+              <p className="text-zinc-500 font-bold max-w-md mx-auto text-lg leading-relaxed pt-4">
+                Talk to each other. One short clue per player. Identify the{" "}
+                <span className="text-red-500 underline">Imposter</span>.
+              </p>
+
+              {gameState.discussionStarterId && (
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="inline-flex items-center gap-3 bg-emerald-50 border-2 border-emerald-500 px-6 py-3 rounded-2xl mx-auto"
+                >
+                  <MessageSquare className="text-emerald-500" size={20} />
+                  <span className="font-black uppercase text-sm text-zinc-900 italic">
+                    Starter:{" "}
+                    <span className="text-emerald-600 underline">
+                      {gameState.discussionStarterId}
+                    </span>
+                  </span>
+                </motion.div>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 sm:gap-10">
-        {gameState.groups.map((group, index) => (
-          <motion.div
-            key={group.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-[8px_8px_0_#18181b] sm:shadow-[15px_15px_0_#18181b] border-4 border-zinc-900 space-y-8 relative overflow-hidden group hover:-translate-y-2 hover:shadow-[12px_12px_0_#18181b] sm:hover:shadow-[20px_20px_0_#18181b] transition-all"
-          >
-            {/* Background Number */}
-            <div className="absolute -bottom-10 -right-10 text-[12rem] font-black text-zinc-50 opacity-0 group-hover:opacity-100 transition-all duration-500 select-none pointer-events-none italic">
-              {index + 1}
-            </div>
-
-            <div className="flex justify-between items-start relative">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
-                    Active Team
-                  </p>
-                </div>
-                <h3 className="text-3xl font-black uppercase italic text-zinc-900 leading-none tracking-tighter">
-                  {group.name}
-                </h3>
-              </div>
-              <div className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center font-black italic text-white shadow-lg rotate-3 group-hover:rotate-0 transition-transform">
-                #{group.id}
-              </div>
-            </div>
-
-            <div className="space-y-4 relative">
-              {group.playerIds.map((pid, pIdx) => (
-                <div
-                  key={pid}
-                  className="flex items-center gap-4 px-6 py-5 bg-zinc-50 rounded-[2rem] font-black text-zinc-900 border-2 border-zinc-100 group-hover:border-emerald-500/30 group-hover:bg-emerald-50/30 transition-all"
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {remoteRoom.players.map((p: any, i: number) => {
+              const isStarter = p.name === gameState.discussionStarterId;
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={`bg-white rounded-[2.5rem] p-6 shadow-[15px_15px_0_#18181b] border-4 flex items-center gap-6 group hover:-translate-y-2 transition-all ${isStarter ? "border-emerald-500" : "border-zinc-900"}`}
                 >
                   <div
-                    className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-xs italic ${pid === gameState.discussionStarterId ? "bg-emerald-500 border-emerald-500 text-white" : "bg-white border-zinc-200 text-zinc-400"}`}
+                    className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-white text-2xl italic rotate-3 group-hover:rotate-0 transition-transform ${isStarter ? "bg-emerald-500" : "bg-zinc-900"}`}
                   >
-                    {pid === gameState.discussionStarterId ? (
-                      <Vote size={16} />
-                    ) : (
-                      pIdx + 1
-                    )}
+                    {i + 1}
                   </div>
-                  <span className="uppercase tracking-tight text-lg flex items-center gap-2">
-                    {gameState.players.find((p) => p.id === pid)?.name}
-                    {pid === gameState.discussionStarterId && (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-lg font-black tracking-widest border border-emerald-200">
-                        First
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        ))}
-      </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-2xl font-black uppercase italic text-zinc-900 tracking-tighter">
+                        {p.name}
+                      </h3>
+                      {isStarter && (
+                        <div className="bg-emerald-500 text-white p-1 rounded-lg">
+                          <MessageSquare size={12} fill="currentColor" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">
+                      {isStarter ? "Starts the Discussion" : "Participant"}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
 
-      <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="pt-10 flex flex-col items-center gap-6"
-      >
-        <button
-          onClick={() => setGameState((prev) => ({ ...prev, phase: "VOTING" }))}
-          className="group relative px-6 py-5 md:px-12 md:py-6 bg-zinc-900 text-white rounded-[2rem] md:rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-lg md:text-xl hover:bg-emerald-500 transition-all shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
+          <div className="pt-10 flex flex-col items-center gap-6">
+            {isRemoteHost ? (
+              <button
+                onClick={() => updateRemoteState("voting")}
+                className="px-12 py-6 bg-zinc-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-xl hover:bg-emerald-500 transition-all shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3 flex items-center justify-center gap-4"
+              >
+                <Vote size={28} /> Start Voting Phase <ChevronRight size={28} />
+              </button>
+            ) : (
+              <div className="text-center p-8 bg-zinc-100 rounded-3xl border-4 border-dashed border-zinc-200">
+                <p className="text-zinc-500 font-black uppercase tracking-widest text-sm animate-pulse">
+                  The Host will start voting soon...
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 lg:py-16 space-y-12 sm:space-y-20 min-h-screen">
+        <div className="text-center space-y-8 sm:space-y-10">
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="inline-block px-8 py-2.5 bg-zinc-900 text-white rounded-full text-[10px] sm:text-xs font-black uppercase tracking-[0.3em] shadow-[6px_6px_0_#10b981] sm:shadow-[10px_10px_0_#10b981]"
+          >
+            Discussion Phase
+          </motion.div>
+          <div className="space-y-4">
+            <h2 className="text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85]">
+              Speak Your <span className="text-emerald-500">Truth</span>
+            </h2>
+            <p className="text-zinc-400 font-black uppercase tracking-[0.3em] text-[10px] sm:text-sm">
+              Round {gameState.groups.length} • {gameState.players.length}{" "}
+              Players 👥
+            </p>
+          </div>
+          <div className="space-y-4">
+            <p className="text-zinc-500 font-bold max-w-md mx-auto text-sm sm:text-lg">
+              Each player gives one short clue about the secret word. Don't be
+              too obvious!
+            </p>
+            <div className="inline-flex items-center gap-3 bg-white px-6 py-4 rounded-2xl border-2 border-emerald-500 shadow-[4px_4px_0_#10b981]">
+              <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">
+                <span className="text-emerald-600">
+                  {
+                    gameState.players.find(
+                      (p) => p.id === gameState.discussionStarterId,
+                    )?.name
+                  }
+                </span>{" "}
+                starts the discussion!
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 sm:gap-10">
+          {remoteRoom
+            ? // Remote: Group players by team if teammates exist, or show as individuals
+              Array.from(
+                new Set(
+                  remoteRoom.players.map((p: any) => p.team_name || "No Team"),
+                ),
+              ).map((teamName: any, teamIdx) => {
+                const teamPlayers = remoteRoom.players.filter(
+                  (p: any) => (p.team_name || "No Team") === teamName,
+                );
+                return (
+                  <motion.div
+                    key={teamName}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: teamIdx * 0.1 }}
+                    className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-[8px_8px_0_#18181b] sm:shadow-[15px_15px_0_#18181b] border-4 border-zinc-900 space-y-8 relative overflow-hidden group hover:-translate-y-2 hover:shadow-[12px_12px_0_#18181b] sm:hover:shadow-[20px_20px_0_#18181b] transition-all"
+                  >
+                    <div className="flex justify-between items-start relative">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                            {teamName === "No Team" ? "Individual" : "Team"}
+                          </p>
+                        </div>
+                        <h3 className="text-2xl font-black uppercase italic text-zinc-900 leading-none tracking-tighter">
+                          {teamName}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 relative">
+                      {teamPlayers.map((p: any, pIdx: number) => (
+                        <div
+                          key={p.name}
+                          className="flex items-center gap-4 px-6 py-5 bg-zinc-50 rounded-[2rem] font-black text-zinc-900 border-2 border-zinc-100 group-hover:border-emerald-500/30 group-hover:bg-emerald-50/30 transition-all"
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-xs italic ${p.name === gameState.discussionStarterId ? "bg-emerald-500 border-emerald-500 text-white" : "bg-white border-zinc-200 text-zinc-400"}`}
+                          >
+                            {p.name === gameState.discussionStarterId ? (
+                              <Vote size={16} />
+                            ) : (
+                              pIdx + 1
+                            )}
+                          </div>
+                          <span className="uppercase tracking-tight text-lg flex items-center gap-2">
+                            {p.name}
+                            {p.name === gameState.discussionStarterId && (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-lg font-black tracking-widest border border-emerald-200">
+                                First
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                );
+              })
+            : gameState.groups.map((group, index) => (
+                <motion.div
+                  key={group.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-[8px_8px_0_#18181b] sm:shadow-[15px_15px_0_#18181b] border-4 border-zinc-900 space-y-8 relative overflow-hidden group hover:-translate-y-2 hover:shadow-[12px_12px_0_#18181b] sm:hover:shadow-[20px_20px_0_#18181b] transition-all"
+                >
+                  {/* Background Number */}
+                  <div className="absolute -bottom-10 -right-10 text-[12rem] font-black text-zinc-50 opacity-0 group-hover:opacity-100 transition-all duration-500 select-none pointer-events-none italic">
+                    {index + 1}
+                  </div>
+
+                  <div className="flex justify-between items-start relative">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                          Active Team
+                        </p>
+                      </div>
+                      <h3 className="text-3xl font-black uppercase italic text-zinc-900 leading-none tracking-tighter">
+                        {group.name}
+                      </h3>
+                    </div>
+                    <div className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center font-black italic text-white shadow-lg rotate-3 group-hover:rotate-0 transition-transform">
+                      #{group.id}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 relative">
+                    {group.playerIds.map((pid, pIdx) => (
+                      <div
+                        key={pid}
+                        className="flex items-center gap-4 px-6 py-5 bg-zinc-50 rounded-[2rem] font-black text-zinc-900 border-2 border-zinc-100 group-hover:border-emerald-500/30 group-hover:bg-emerald-50/30 transition-all"
+                      >
+                        <div
+                          className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-xs italic ${pid === gameState.discussionStarterId ? "bg-emerald-500 border-emerald-500 text-white" : "bg-white border-zinc-200 text-zinc-400"}`}
+                        >
+                          {pid === gameState.discussionStarterId ? (
+                            <Vote size={16} />
+                          ) : (
+                            pIdx + 1
+                          )}
+                        </div>
+                        <span className="uppercase tracking-tight text-lg flex items-center gap-2">
+                          {gameState.players.find((p) => p.id === pid)?.name}
+                          {pid === gameState.discussionStarterId && (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-lg font-black tracking-widest border border-emerald-200">
+                              First
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              ))}
+        </div>
+
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="pt-10 flex flex-col items-center gap-6"
         >
-          <span className="relative z-10 flex items-center gap-4">
-            <Vote size={28} /> Initiate Voting <ChevronRight size={28} />
-          </span>
-        </button>
-        <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px] flex items-center gap-2">
-          <Info size={14} /> Ready to catch the imposter?
-        </p>
-      </motion.div>
-    </div>
-  );
+          <button
+            onClick={() =>
+              setGameState((prev) => ({ ...prev, phase: "VOTING" }))
+            }
+            className="group relative px-6 py-5 md:px-12 md:py-6 bg-zinc-900 text-white rounded-[2rem] md:rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-lg md:text-xl hover:bg-emerald-500 transition-all shadow-[0_8px_0_#000] md:shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3"
+          >
+            <span className="relative z-10 flex items-center gap-4">
+              <Vote size={28} /> Initiate Voting <ChevronRight size={28} />
+            </span>
+          </button>
+          <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px] flex items-center gap-2">
+            <Info size={14} /> Ready to catch the imposter?
+          </p>
+        </motion.div>
+      </div>
+    );
+  };
 
   const renderVoting = () => {
+    if (remoteRoom) {
+      const myPlayer = remoteRoom.players.find(
+        (p: any) => p.name === remotePlayerName,
+      );
+      const others = remoteRoom.players.filter(
+        (p: any) => p.name !== remotePlayerName,
+      );
+      const hasSubmitted = !!myPlayer?.vote;
+      const currentSelection = hasSubmitted
+        ? myPlayer.vote.includes(",")
+          ? myPlayer.vote.split(",")
+          : [myPlayer.vote]
+        : localRemoteVotes;
+
+      const votedCount = remoteRoom.players.filter(
+        (p: any) => p.hasVoted,
+      ).length;
+
+      const toggleLocalVote = (name: string) => {
+        if (hasSubmitted) return;
+        setLocalRemoteVotes((prev) => {
+          if (prev.includes(name)) return prev.filter((n) => n !== name);
+          if (prev.length < gameState.numImposters) return [...prev, name];
+          return [...prev.slice(1), name];
+        });
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto px-4 py-8 space-y-12 min-h-screen">
+          <div className="text-center space-y-10">
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="inline-block px-8 py-3 bg-red-500 text-white rounded-full text-xs font-black uppercase tracking-[0.3em] shadow-[10px_10px_0_#000]"
+            >
+              Voting Phase • {votedCount}/{remoteRoom.players.length} Voted
+            </motion.div>
+            <div className="space-y-6">
+              <h2 className="text-5xl sm:text-7xl lg:text-9xl font-black text-zinc-900 uppercase italic tracking-tighter leading-[0.85]">
+                Who is <span className="text-red-500">Sus?</span>
+              </h2>
+              <p className="text-zinc-500 font-black uppercase tracking-widest text-xs pt-4">
+                Select {gameState.numImposters} Suspected Imposter
+                {gameState.numImposters > 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {others.map((player: any, index: number) => {
+              const isSelected = currentSelection.includes(player.name);
+              return (
+                <motion.button
+                  key={player.name}
+                  onClick={() => toggleLocalVote(player.name)}
+                  className={`w-full p-8 rounded-[3rem] border-4 transition-all text-left flex justify-between items-center group relative overflow-hidden ${
+                    isSelected
+                      ? "bg-zinc-900 border-zinc-900 text-white shadow-[15px_15px_0_#ef4444]"
+                      : player.hasVoted && !hasSubmitted
+                        ? "bg-zinc-50 border-zinc-100 text-zinc-400 opacity-50"
+                        : "bg-white border-zinc-100 text-zinc-900 hover:border-zinc-900 hover:shadow-[15px_15px_0_#18181b]"
+                  }`}
+                >
+                  <div className="relative z-10 space-y-2">
+                    <div className="flex flex-col">
+                      <h3 className="text-2xl font-black uppercase italic leading-none tracking-tighter">
+                        {player.name}
+                      </h3>
+                      {player.team_name && (
+                        <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest italic mt-1">
+                          Team: {player.team_name}
+                        </span>
+                      )}
+                    </div>
+                    {player.hasVoted && (
+                      <span className="text-[10px] font-black uppercase text-emerald-500">
+                        Already Voted ✓
+                      </span>
+                    )}
+                  </div>
+                  {isSelected && (
+                    <div className="bg-red-500 text-white w-10 h-10 rounded-2xl flex items-center justify-center font-black">
+                      {currentSelection.indexOf(player.name) + 1}
+                    </div>
+                  )}
+                </motion.button>
+              );
+            })}
+          </div>
+
+          <div className="pt-10 flex flex-col items-center gap-6">
+            {!hasSubmitted ? (
+              <button
+                disabled={currentSelection.length === 0}
+                onClick={() => submitRemoteVote(currentSelection)}
+                className="w-full py-6 bg-red-500 text-white rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-xl shadow-[0_12px_0_#991b1b] active:shadow-none active:translate-y-3 transition-all disabled:opacity-30 disabled:grayscale flex flex-col items-center justify-center gap-1"
+              >
+                <div className="flex items-center gap-4">
+                  {currentSelection.length < gameState.numImposters ? (
+                    <>
+                      Pick {gameState.numImposters - currentSelection.length}{" "}
+                      More <ChevronRight size={28} />
+                    </>
+                  ) : (
+                    <>
+                      Confirm Selection <Check size={28} />
+                    </>
+                  )}
+                </div>
+                {currentSelection.length > 0 &&
+                  currentSelection.length < gameState.numImposters && (
+                    <span className="text-[10px] opacity-60">
+                      (You can confirm now if you're sure)
+                    </span>
+                  )}
+              </button>
+            ) : isRemoteHost ? (
+              <button
+                onClick={handleRemoteReveal}
+                className="px-12 py-6 bg-zinc-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-xl hover:bg-emerald-500 transition-all shadow-[0_12px_0_#000] active:shadow-none active:translate-y-3 flex items-center justify-center gap-4"
+              >
+                <Trophy size={28} /> Reveal Results <ChevronRight size={28} />
+              </button>
+            ) : (
+              <div className="text-center p-8 bg-zinc-100 rounded-3xl border-4 border-dashed border-zinc-200 w-full">
+                <p className="text-zinc-500 font-black uppercase tracking-widest text-sm animate-pulse">
+                  Waiting for everyone to vote and host to reveal...
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     const currentPlayer = gameState.players[gameState.currentVotingPlayerIndex];
     const currentPlayerVotes = gameState.playerVotes[currentPlayer.id] || [];
     const isLastPlayer =
@@ -1519,12 +2974,21 @@ export default function App() {
           className="pt-10"
         >
           <button
-            disabled={currentPlayerVotes.length < gameState.numImposters}
+            disabled={currentPlayerVotes.length === 0}
             onClick={handleConfirmVote}
-            className="w-full py-4 sm:py-6 md:py-8 bg-red-500 text-white rounded-[2rem] md:rounded-[3rem] font-black text-xl sm:text-2xl md:text-3xl shadow-[0_6px_0_#991b1b] sm:shadow-[0_10px_0_#991b1b] md:shadow-[0_15px_0_#991b1b] active:shadow-none active:translate-y-3 transition-all disabled:opacity-30 disabled:grayscale flex items-center justify-center gap-4 uppercase italic tracking-[0.1em]"
+            className="w-full py-4 sm:py-6 md:py-8 bg-red-500 text-white rounded-[2rem] md:rounded-[3rem] font-black text-xl sm:text-2xl md:text-3xl shadow-[0_6px_0_#991b1b] sm:shadow-[0_10px_0_#991b1b] md:shadow-[0_15px_0_#991b1b] active:shadow-none active:translate-y-3 transition-all disabled:opacity-30 disabled:grayscale flex flex-col items-center justify-center gap-1 uppercase italic tracking-[0.1em]"
           >
-            {isLastPlayer ? "Reveal Truth" : "Confirm Vote"}{" "}
-            <ChevronRight size={32} />
+            <div className="flex items-center gap-4">
+              {isLastPlayer ? "Reveal Truth" : "Confirm Vote"}{" "}
+              <ChevronRight size={32} />
+            </div>
+            {currentPlayerVotes.length > 0 &&
+              currentPlayerVotes.length < gameState.numImposters && (
+                <span className="text-xs opacity-60 not-italic font-bold">
+                  ({gameState.numImposters - currentPlayerVotes.length} more
+                  possible)
+                </span>
+              )}
           </button>
           <p className="text-center mt-6 text-zinc-400 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
             <Info size={14} /> {currentPlayerVotes.length}/
@@ -1620,7 +3084,15 @@ export default function App() {
       try {
         const batch = updatedGroups.map((group) => {
           const roundScore = groupPoints[group.id] || 0;
-          return { name: group.name, score: roundScore };
+          const members = group.playerIds.map(
+            (id) => gameState.players.find((p) => p.id === id)?.name || "",
+          );
+          return {
+            name: group.name,
+            score: roundScore,
+            members,
+            type: gameMode === "TEAM" ? "team" : "solo",
+          };
         });
 
         if (batch.length > 0) {
@@ -1641,6 +3113,257 @@ export default function App() {
   };
 
   const renderResult = () => {
+    if (remoteRoom) {
+      const imposterPlayers = remoteRoom.players.filter(
+        (p: any) => p.role === "imposter",
+      );
+      const imposterIds = imposterPlayers.map((p: any) => p.name);
+      const voteCounts: Record<string, number> = {};
+      remoteRoom.players.forEach((p: any) => {
+        if (p.vote) {
+          const names = p.vote.includes(",") ? p.vote.split(",") : [p.vote];
+          names.forEach((name: string) => {
+            voteCounts[name] = (voteCounts[name] || 0) + 1;
+          });
+        }
+      });
+
+      let maxVotes = 0;
+      let mostVotedPlayerNames: string[] = [];
+      Object.entries(voteCounts).forEach(([name, count]) => {
+        if (count > maxVotes) {
+          maxVotes = count;
+          mostVotedPlayerNames = [name];
+        } else if (count === maxVotes) {
+          mostVotedPlayerNames.push(name);
+        }
+      });
+
+      const caughtImposters = mostVotedPlayerNames.filter((name) =>
+        imposterIds.includes(name),
+      );
+      const isCorrect = caughtImposters.length > 0;
+
+      const votingSummary = remoteRoom.players.map((p: any) => {
+        const votes = p.vote
+          ? p.vote.includes(",")
+            ? p.vote.split(",")
+            : [p.vote]
+          : [];
+        const isImposter = p.role === "imposter";
+        let pointsGained = 0;
+
+        if (!isImposter) {
+          pointsGained = votes.filter((v: string) =>
+            imposterIds.includes(v),
+          ).length;
+        } else {
+          const nonImposters = remoteRoom.players.filter(
+            (pl: any) => pl.role !== "imposter",
+          );
+          pointsGained = nonImposters.filter((ni: any) => {
+            const niVotes = ni.vote
+              ? ni.vote.includes(",")
+                ? ni.vote.split(",")
+                : [ni.vote]
+              : [];
+            return !niVotes.includes(p.name);
+          }).length;
+        }
+
+        return {
+          name: p.name,
+          team_name: p.team_name,
+          isImposter,
+          pointsGained,
+          votes,
+        };
+      });
+
+      return (
+        <div className="max-w-6xl mx-auto px-4 py-8 space-y-12 min-h-screen">
+          <div className="text-center space-y-8 relative">
+            <div className="absolute -top-2 -right-2">
+              <button
+                onClick={() =>
+                  setGameState((prev) => ({ ...prev, phase: "LEADERBOARD" }))
+                }
+                title="View Global Leaderboard"
+                className="p-2 text-amber-500 hover:text-amber-600 transition-all hover:scale-110 active:scale-95 flex flex-col items-center"
+              >
+                <Trophy size={32} fill="currentColor" />
+                <span className="text-[8px] font-black uppercase mt-1">
+                  Board
+                </span>
+              </button>
+            </div>
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className={`inline-block px-10 py-3 text-white rounded-full text-xs font-black uppercase tracking-[0.4em] shadow-[8px_8px_0_#18181b] ${isCorrect ? "bg-emerald-500" : "bg-red-500"}`}
+            >
+              {isCorrect ? "Imposter Caught!" : "Imposter Escaped!"}
+            </motion.div>
+            <h2 className="text-6xl font-black text-zinc-900 uppercase italic tracking-tighter">
+              The <span className="text-emerald-500">Reveal</span>
+            </h2>
+          </div>
+
+          <div className="bg-white rounded-[3rem] p-8 border-8 border-zinc-900 shadow-[20px_20px_0_#18181b] space-y-8">
+            <div className="text-center space-y-4">
+              <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px]">
+                The Secret Word Was
+              </p>
+              <h3 className="text-6xl font-black text-emerald-500 uppercase italic tracking-tighter">
+                {gameState.secretWord}
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Imposters Column */}
+              <div className="space-y-6">
+                <div className="bg-zinc-50 rounded-3xl p-6 border-4 border-zinc-100">
+                  <h4 className="font-black uppercase text-sm mb-4 flex items-center gap-2">
+                    <Ghost size={20} className="text-red-500" /> Imposters
+                  </h4>
+                  {imposterPlayers.map((p: any) => (
+                    <div
+                      key={p.name}
+                      className="p-4 bg-zinc-900 text-white rounded-2xl font-black uppercase mb-2"
+                    >
+                      <div className="flex flex-col">
+                        <span>{p.name}</span>
+                        {p.team_name && (
+                          <span className="text-[10px] font-black text-emerald-500/70 uppercase">
+                            Team: {p.team_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="bg-zinc-50 rounded-3xl p-6 border-4 border-zinc-100 max-h-[400px] overflow-y-auto custom-scrollbar">
+                  <h4 className="font-black uppercase text-sm mb-4">
+                    Voting Breakdown 🗳️
+                  </h4>
+                  {remoteRoom.players.map((p: any) => {
+                    const votes = p.vote
+                      ? p.vote.includes(",")
+                        ? p.vote.split(",")
+                        : [p.vote]
+                      : [];
+                    return (
+                      <div
+                        key={p.name}
+                        className="text-xs font-bold uppercase py-2 flex flex-col border-b border-zinc-100 last:border-0"
+                      >
+                        <div className="flex justify-between">
+                          <div className="flex flex-col">
+                            <span className="text-zinc-900">{p.name}</span>
+                            {p.team_name && (
+                              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest italic">
+                                Team: {p.team_name}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-zinc-400">
+                            {votes.length} vote{votes.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {votes.map((v: string) => (
+                            <span
+                              key={v}
+                              className={
+                                imposterIds.includes(v)
+                                  ? "text-emerald-500"
+                                  : "text-red-400"
+                              }
+                            >
+                              {v}
+                            </span>
+                          ))}
+                          {votes.length === 0 && (
+                            <span className="text-zinc-300 italic">No one</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Scoreboard Column (Spans 2) */}
+              <div className="lg:col-span-2 bg-white rounded-[2.5rem] border-4 border-zinc-900 p-8 shadow-[15px_15px_0_#18181b]">
+                <div className="flex justify-between items-center mb-8">
+                  <h4 className="text-3xl font-black uppercase italic tracking-tighter">
+                    Round Scoreboard
+                  </h4>
+                  <div className="px-4 py-1 bg-amber-500 text-white rounded-full text-[10px] font-black uppercase tracking-widest">
+                    Points Gained
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {votingSummary
+                    .sort((a, b) => b.pointsGained - a.pointsGained)
+                    .map((p: any) => (
+                      <div
+                        key={p.name}
+                        className="flex justify-between items-center p-5 bg-zinc-50 rounded-2xl border-2 border-zinc-100 group hover:border-emerald-500 transition-all"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl border-4 ${p.pointsGained > 0 ? "bg-emerald-50 border-emerald-500 text-emerald-600" : "bg-white border-zinc-200 text-zinc-300"}`}
+                          >
+                            {p.isImposter ? "🎭" : "👤"}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-xl font-black text-zinc-900 uppercase italic leading-none">
+                              {p.name}
+                            </span>
+                            {p.team_name && (
+                              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-1">
+                                {p.team_name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`text-3xl font-black ${p.pointsGained > 0 ? "text-emerald-500" : "text-zinc-300"}`}
+                          >
+                            +{p.pointsGained}
+                          </span>
+                          <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                            pts
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {isRemoteHost ? (
+              <button
+                onClick={() => updateRemoteState("lobby")}
+                className="w-full py-6 bg-zinc-900 text-white rounded-3xl font-black uppercase tracking-widest shadow-[0_10px_0_#000] active:shadow-none active:translate-y-2 transition-all flex items-center justify-center gap-4 text-xl"
+              >
+                <RefreshCw size={28} /> Start New Round
+              </button>
+            ) : (
+              <div className="text-center p-8 bg-zinc-100 rounded-3xl border-4 border-dashed border-zinc-200">
+                <p className="text-zinc-500 font-black uppercase tracking-widest text-sm animate-pulse">
+                  The host is preparing the next round...
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     const imposterPlayers = gameState.players.filter((p) => p.isImposter);
     const imposterIds = imposterPlayers.map((p) => p.id);
 
@@ -2130,6 +3853,26 @@ export default function App() {
               {renderLobby()}
             </motion.div>
           )}
+          {gameState.phase === "REMOTE_LOBBY" && (
+            <motion.div
+              key="remote-lobby"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+            >
+              {renderRemoteLobby()}
+            </motion.div>
+          )}
+          {gameState.phase === "REMOTE_JOIN" && (
+            <motion.div
+              key="remote-join"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.1 }}
+            >
+              {renderRemoteJoin()}
+            </motion.div>
+          )}
           {gameState.phase === "REVEAL" && (
             <motion.div
               key="reveal"
@@ -2190,6 +3933,20 @@ export default function App() {
           </p>
         </div>
       </div>
+
+      {/* Styled Kicked Message Overlay */}
+      <AnimatePresence>
+        {kickedMessage && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: -50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] bg-red-500 text-white px-8 py-4 rounded-[2rem] font-black uppercase tracking-widest shadow-[0_10px_0_#991b1b] border-4 border-zinc-900 flex items-center gap-4"
+          >
+            <Trash2 size={24} /> {kickedMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
