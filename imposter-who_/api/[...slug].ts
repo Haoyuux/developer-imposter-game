@@ -1,8 +1,21 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { Redis } from "@upstash/redis";
 
-// ─── Ephemeral In-Memory Storage ───
-// Uses globalThis to persist data across module reloads within the same Vercel instance.
-// This survives warm invocations but resets on cold starts.
+// ─── Redis Storage (persistent across Vercel instances) ───
+
+let redis: Redis | null = null;
+function getRedis(): Redis | null {
+  if (redis) return redis;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (url && token) {
+    redis = new Redis({ url, token });
+    return redis;
+  }
+  return null;
+}
+
+// ─── Fallback: In-Memory Storage (for local dev or if no Redis) ───
 
 interface EphemeralPlayer {
   name: string;
@@ -24,7 +37,6 @@ interface EphemeralRoom {
   created_at: number;
 }
 
-// Persist across module reloads using globalThis
 const g = globalThis as any;
 if (!g._ephemeralLeaderboard) g._ephemeralLeaderboard = [];
 if (!g._rooms) g._rooms = new Map();
@@ -36,8 +48,38 @@ const ephemeralLeaderboard: {
   members?: string[];
   type: string;
 }[] = g._ephemeralLeaderboard;
-const rooms: Map<string, EphemeralRoom> = g._rooms;
+const fallbackRooms: Map<string, EphemeralRoom> = g._rooms;
 let recentWords: string[] = g._recentWords;
+
+// ─── Room Storage Abstraction (Redis with fallback to in-memory) ───
+
+async function getRoom(code: string): Promise<EphemeralRoom | null> {
+  const r = getRedis();
+  if (r) {
+    const data = await r.get<EphemeralRoom>(`room:${code}`);
+    return data || null;
+  }
+  return fallbackRooms.get(code) || null;
+}
+
+async function setRoom(code: string, room: EphemeralRoom): Promise<void> {
+  const r = getRedis();
+  if (r) {
+    // TTL of 2 hours — rooms auto-expire if abandoned
+    await r.set(`room:${code}`, room, { ex: 7200 });
+  } else {
+    fallbackRooms.set(code, room);
+  }
+}
+
+async function deleteRoom(code: string): Promise<void> {
+  const r = getRedis();
+  if (r) {
+    await r.del(`room:${code}`);
+  } else {
+    fallbackRooms.delete(code);
+  }
+}
 
 // ─── Randomization Helpers ───
 
@@ -223,6 +265,7 @@ async function generateGameData(
   // Track recent words
   recentWords.push(word);
   if (recentWords.length > 15) recentWords = recentWords.slice(-15);
+  g._recentWords = recentWords;
 
   return {
     word,
@@ -233,20 +276,16 @@ async function generateGameData(
   };
 }
 
-// ─── Helper: Generate Room Code ───
+// ─── Helpers ───
 
 function generateRoomCode(): string {
   return Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
-// ─── Helper: Clean stale players (inactive > 60s) ───
-
 function cleanStalePlayers(room: EphemeralRoom) {
   const cutoff = Date.now() - 60000;
   room.players = room.players.filter((p) => p.last_active > cutoff);
 }
-
-// ─── Helper: Sanitize players for response ───
 
 function sanitizePlayers(room: EphemeralRoom, playerName?: string): any[] {
   const isHost = room.host_name === playerName;
@@ -333,7 +372,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ) {
     ephemeralLeaderboard.length = 0;
     g._ephemeralLeaderboard = ephemeralLeaderboard;
-    rooms.clear();
     return res.status(200).json({ success: true });
   }
 
@@ -345,6 +383,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       status: "ok",
       message: "Neural Core Online (DeepSeek)",
+      redis: !!getRedis(),
     });
   }
 
@@ -391,9 +430,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       players: [],
       created_at: Date.now(),
     };
-    rooms.set(code, room);
+    await setRoom(code, room);
     console.log(
-      `[Room Create] Created room ${code}. Total rooms in memory: ${rooms.size}`,
+      `[Room Create] Created room ${code}. Storage: ${getRedis() ? "Redis" : "Memory"}`,
     );
     return res.status(200).json({ success: true, code, roomId: code });
   }
@@ -407,7 +446,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!code || !name) {
       return res.status(400).json({ error: "Code and name required" });
     }
-    const room = rooms.get(code);
+    const room = await getRoom(code);
     if (!room) return res.status(404).json({ error: "Room not found" });
 
     // Check for duplicate name
@@ -429,27 +468,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       last_active: Date.now(),
     });
 
+    await setRoom(code, room);
     return res
       .status(200)
       .json({ success: true, playerId: name, roomId: code });
   }
 
   // --- Room endpoints with code in URL ---
-  // Match /api/rooms/XXXXX or /api/rooms/XXXXX/action
   const roomMatch = url.match(/\/api\/rooms\/([A-Z0-9]{4,7})(?:\/([^?/]+))?/i);
   if (roomMatch) {
     const code = roomMatch[1].toUpperCase();
-    const action = roomMatch[2] || null; // start, vote, leave, kick, update-state, settings, join-team, play-again
-    const room = rooms.get(code);
+    const action = roomMatch[2] || null;
+    const room = await getRoom(code);
 
     if (!room) {
       console.log(
-        `[Room GET] Room ${code} NOT found. Active rooms: [${Array.from(rooms.keys()).join(", ")}]`,
+        `[Room] Room ${code} NOT found (action: ${action}). Storage: ${getRedis() ? "Redis" : "Memory"}`,
       );
       return res.status(404).json({ error: "Room not found" });
     }
 
-    // --- GET /api/rooms/:code (Get Room Status) ---
+    // --- GET /api/rooms/:code ---
     if (!action && method === "GET") {
       cleanStalePlayers(room);
 
@@ -461,7 +500,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // Access control
       const isHost = room.host_name === playerName;
       const isPlayerInRoom = room.players.some((p) => p.name === playerName);
       if (playerName && !isHost && !isPlayerInRoom) {
@@ -469,6 +507,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .status(401)
           .json({ error: "Access denied: You are not in this room." });
       }
+
+      // Save updated last_active back
+      await setRoom(code, room);
 
       return res.status(200).json({
         code: room.code,
@@ -494,19 +535,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(400).json({ error: "Need at least 3 players" });
         }
 
-        // Assign roles
         const shuffled = [...room.players].sort(() => Math.random() - 0.5);
         const imposterCount = numImposters || 1;
         const starter =
           room.players[Math.floor(Math.random() * room.players.length)].name;
 
-        // Reset all to player
         room.players.forEach((p) => {
           p.role = "player";
           p.vote = null;
         });
 
-        // Assign imposters
         for (let i = 0; i < Math.min(imposterCount, shuffled.length - 1); i++) {
           const target = room.players.find((p) => p.name === shuffled[i].name);
           if (target) target.role = "imposter";
@@ -519,6 +557,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           discussionStarter: starter,
         };
 
+        await setRoom(code, room);
         return res.status(200).json({ success: true });
       } catch (err: any) {
         return res.status(500).json({ error: err.message });
@@ -532,6 +571,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (player) {
         player.vote = vote;
       }
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
@@ -539,6 +579,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "leave" && method === "POST") {
       const { name } = req.body || {};
       room.players = room.players.filter((p) => p.name !== name);
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
@@ -546,16 +587,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "kick" && method === "POST") {
       const { name } = req.body || {};
       room.players = room.players.filter((p) => p.name !== name);
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
-    // --- POST /api/rooms/:code/update-state (also accepts /state) ---
+    // --- POST /api/rooms/:code/update-state ---
     if (
       (action === "update-state" || action === "state") &&
       method === "POST"
     ) {
       const { state } = req.body || {};
       if (state) room.state = state;
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
@@ -563,6 +606,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "settings" && method === "POST") {
       const { settings } = req.body || {};
       if (settings) room.settings = settings;
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
@@ -573,6 +617,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (player) {
         player.team_name = team;
       }
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
@@ -584,10 +629,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p.role = "player";
         p.vote = null;
       });
+      await setRoom(code, room);
       return res.status(200).json({ success: true });
     }
 
-    // Fallback for unrecognized room action
+    // Fallback
     return res.status(200).json({ message: "Room action not found", url });
   }
 
