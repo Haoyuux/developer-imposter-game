@@ -1,7 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 // Ephemeral storage for Vercel (resets on cold starts)
-let ephemeralLeaderboard: { name: string; score: number }[] = [];
+let ephemeralLeaderboard: {
+  name: string;
+  score: number;
+  members?: string[];
+  type: string;
+}[] = [];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, url = "" } = req;
@@ -16,7 +21,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 1. Leaderboard Endpoints
   if (url.includes("/api/leaderboard") || url.endsWith("/leaderboard")) {
+    const { type = "team" } = req.query;
     const sorted = [...ephemeralLeaderboard]
+      .filter((e) => e.type === type)
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
     return res.status(200).json(sorted);
@@ -28,15 +35,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const body = req.body;
         const updates = Array.isArray(body) ? body : [body];
 
-        for (const { name, score } of updates) {
+        for (const { name, score, members, type = "team" } of updates) {
           if (!name) continue;
           const existing = ephemeralLeaderboard.find(
-            (e) => e.name.toLowerCase() === name.toLowerCase(),
+            (e) =>
+              e.name.toLowerCase() === name.toLowerCase() && e.type === type,
           );
           if (existing) {
             existing.score += score;
+            if (members && Array.isArray(members)) {
+              if (!existing.members) existing.members = [];
+              members.forEach((m: string) => {
+                if (!existing.members!.includes(m)) existing.members!.push(m);
+              });
+            }
           } else {
-            ephemeralLeaderboard.push({ name, score });
+            ephemeralLeaderboard.push({
+              name,
+              score,
+              members: members || [],
+              type,
+            });
           }
         }
         return res.status(200).json({ success: true, count: updates.length });
