@@ -3926,12 +3926,17 @@ export default function App() {
       </main>
 
       {/* Watermark */}
-      <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
-        <div className="bg-zinc-900/90 backdrop-blur-sm text-zinc-300 px-4 py-2.5 rounded-2xl border-2 border-zinc-800 shadow-lg">
-          <p className="text-[10px] sm:text-xs font-black select-none uppercase tracking-widest">
-            Made by Brigada Developer
+      <div className="fixed bottom-4 right-4 z-50">
+        <a
+          href="https://blaisemercado-portfolio.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block bg-zinc-900/90 backdrop-blur-sm text-zinc-300 px-4 py-2.5 rounded-2xl border-2 border-zinc-800 shadow-lg hover:bg-emerald-500 hover:text-white hover:border-emerald-400 transition-all cursor-pointer group"
+        >
+          <p className="text-[10px] sm:text-xs font-black uppercase tracking-widest select-none">
+            blaise mercado
           </p>
-        </div>
+        </a>
       </div>
 
       {/* Styled Kicked Message Overlay */}
